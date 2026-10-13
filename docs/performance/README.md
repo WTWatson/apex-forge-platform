@@ -20,7 +20,7 @@ Each module has one table. Each row is one run of the module on a number of reco
 | DML        | Number of insert, update or delete statements. The limit is 150.                     |
 | DML rows   | Records those statements wrote. The limit is 10,000.                                 |
 | Wall ms    | Elapsed time, in milliseconds, as a rough guide only. It varies with the org's load. |
-| Change     | The difference from the previous published run.                                      |
+| Change     | The difference from the previous published version, run again in the same org.       |
 
 Under each table, **consumer lines** compares the Apex you write for one everyday
 task with the platform and without it, in plain Apex. Blank lines and comments are
@@ -30,8 +30,18 @@ side by side.
 ## How the numbers are measured
 
 - A benchmark drives the module's public methods the way your code would.
-- Each module is measured in its own fresh scratch org, five times. The table shows
-  the middle (median) value, so one slow run doesn't skew it.
+- Each benchmark run uses one fresh scratch org, and each version is measured in it
+  five times. The table shows the middle (median) value, so one slow run doesn't
+  skew it.
+- CPU time differs between scratch orgs: the same data builder code at 200 records
+  measured 14% slower in a new org than in the one before. So a change is never
+  compared with numbers from another org. The previous published version is
+  deployed to the same org and measured first, then the change is deployed and
+  measured, and the Change column compares the two. The results file keeps the
+  previous version's numbers from that org under `same_org_baseline`.
+- A size that was published before is published again only if it was compared.
+  If the previous version's run in the same org did not handle every record, the
+  change's numbers are not published, and both versions are measured again.
 - Heap is the memory the measured call added: the heap just after the call minus
   the heap just before it. Records the benchmark builds before the call are not in
   it, and neither is memory the call uses and frees again.
@@ -47,36 +57,43 @@ side by side.
 
 ## When a change counts as slower
 
-If a change makes CPU time, or any of the governor measures (heap, queries, query
-rows, DML statements, DML rows), more than 10% worse than the last published run,
-it is treated as a regression. It must be fixed or explained before it is merged.
-The 10% thresholds are set in `perf/thresholds.json`. Wall time is shown but is not checked.
-Faster numbers are reported too.
+A change counts as a regression when, compared with the previous version in the
+same org, it is worse by more than:
+
+- **25% CPU time.** Five runs of the same code in one org have ranged from 444 to
+  712 ms, so a smaller threshold would flag unchanged code.
+- **10% queries, query rows, DML statements or DML rows.** These are exact counts:
+  the same code gives the same number every time.
+- **10% heap, counting only changes of 512 bytes or more.** At 200 and 2,000
+  records the same code's heap repeats within half a percent, so 10% catches real
+  growth. At 1 record the readings are small (about 450 bytes for the trigger
+  handler) and the same code has read up to 63 bytes apart between orgs, more than
+  10% of it. The 512-byte floor keeps that noise from counting.
+
+A regression must be fixed or explained before it is merged. The thresholds are
+set in `perf/thresholds.json`. Wall time is shown but is not checked. Faster numbers
+are reported too.
 
 ## Trigger handler framework
 
-_Run: 2026-10-13, e2a5cf0, API 66.0_
+_Run: 2026-10-13, 1575720, API 66.0_
 
-| Records | CPU ms | Heap | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ---- | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 22     | 455  | 0    | 0          | 1   | 1        | 94      | First published run |
-| 200     | 411    | 5231 | 0    | 0          | 1   | 200      | 606     | First published run |
-| 2000    |        |      |      |            |     |          |         | Not published yet   |
-
-The version measured here has a defect that skips every record after the first
-200, so a 2,000-record number would only be the cost of 200. A fix is on its way,
-and this row is filled in once it is merged.
+| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
+| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ------------------- |
+| 1       | 21     | 487   | 0    | 0          | 1   | 1        | 99      | within thresholds   |
+| 200     | 427    | 5263  | 0    | 0          | 1   | 200      | 635     | within thresholds   |
+| 2000    | 4568   | 48463 | 0    | 0          | 1   | 2000     | 6699    | First published run |
 
 Consumer lines: 15 (with the platform) / 21 (plain Apex)
 
 ## Data builder and seeder
 
-_Run: 2026-10-13, e2a5cf0, API 66.0_
+_Run: 2026-10-13, 1575720, API 66.0_
 
-| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 68     | 3756   | 0    | 0          | 2   | 2        | 223     | First published run |
-| 200     | 434    | 28127  | 0    | 0          | 2   | 201      | 780     | First published run |
-| 2000    | 4773   | 250528 | 0    | 0          | 2   | 2001     | 9060    | First published run |
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ----------------- |
+| 1       | 61     | 3770   | 0    | 0          | 2   | 2        | 206     | within thresholds |
+| 200     | 520    | 28141  | 0    | 0          | 2   | 201      | 1110    | within thresholds |
+| 2000    | 5440   | 250554 | 0    | 0          | 2   | 2001     | 10410   | within thresholds |
 
 Consumer lines: 13 (with the platform) / 31 (plain Apex)
