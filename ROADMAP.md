@@ -17,6 +17,9 @@ module ships as one pull request with its tests, its consumer sample
 _The maintainer sets this order. Each module gets a short design note in
 `docs/design/<module>.md` before any code is written._
 
-1.
+1. **ForgeHttp**: integration callouts without the plumbing. A developer names the
+   Named Credential and writes what the reply changes; the platform builds the
+   request, moves the callout out of the trigger, splits records into calls,
+   retries and mocks it in tests. Design: `docs/design/forge-http.md`.
 2.
 3.
