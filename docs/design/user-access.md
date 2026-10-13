@@ -2,19 +2,19 @@
 
 A developer whose code reads or saves records for a user should write which
 records and which fields, and nothing about checking that user's object and field
-permissions. The platform checks them before it reads or writes. It runs the query
-and the DML in user mode, and when a check fails it raises one error naming the
-object and the field.
+permissions. The platform checks them before it reads or writes. It runs every
+query and every save in user mode, and when a check fails it raises one error
+naming the object and the field.
 
 The name `ForgeAccess` is a proposal; see "Questions for Will".
 
 ## The scenario
 
 A sales rep opens an account in Lightning and sees its open opportunities in a
-small component: name, stage, amount and close date. The rep changes stages and
-amounts in the component and saves. Some reps may read the amount but not edit it.
-The component calls an Apex controller, and that controller must respect the rep's
-permissions: read only what the rep may read, and save only what the rep may edit.
+table: name, stage, amount and close date. The rep changes stages and amounts in
+the table and saves. Some reps may read the amount but not edit it. The table
+calls an Apex controller, and that controller must respect the rep's permissions:
+read only what the rep may read, and save only what the rep may edit.
 
 ### What the developer writes
 
@@ -22,40 +22,44 @@ permissions: read only what the rep may read, and save only what the rep may edi
 /** The open opportunities a sales rep works on an account, read and saved with the rep's permissions. */
 public with sharing class OpenOpportunities
 {
-    /** The account's open opportunities, with the fields the board shows. */
+    /** The account's open opportunities, with the fields the table shows. */
     @AuraEnabled(cacheable=true)
     public static List<Opportunity> forAccount(Id accountId)
     {
-        return ForgeAccess.query(
+        return (List<Opportunity>) ForgeAccess.query(
             'SELECT Name, StageName, Amount, CloseDate FROM Opportunity'
                 + ' WHERE AccountId = :accountId AND IsClosed = false',
             new Map<String, Object>{ 'accountId' => accountId }
         );
     }
 
-    /** Saves the stages and amounts the rep changed. */
+    /** Saves the stages and amounts the rep changed in the table. */
     @AuraEnabled
-    public static void save(List<Opportunity> opportunities)
+    public static void save(List<Opportunity> changes)
     {
-        ForgeAccess.save(opportunities);
+        ForgeAccess.save(changes);
     }
 }
 ```
 
-If the rep may not read `Amount`, `forAccount` raises
-`ForgeAccess.AccessDeniedException` with the message
-"You cannot read Opportunity.Amount." If the rep may read it but not edit it and
-changed it, `save` raises "You cannot edit Opportunity.Amount." and saves nothing.
-In both cases the component shows that message as it is.
+The table sends back only what the rep changed: each record holds its Id and the
+changed fields, as a `lightning-datatable`'s draft values do. If the rep may not
+read `Amount`, `forAccount` raises `ForgeAccess.AccessDeniedException` with the
+message "You cannot read Opportunity.Amount." If the rep may read it but not edit
+it and changed it, `save` raises "You cannot edit Opportunity.Amount." and saves
+nothing. In both cases the table shows that message as it is.
 
-A developer who would rather leave out what the user may not see asks for it in
-the same line:
+A developer who would rather save what the user may edit and leave out the rest
+asks for it in the same line:
 
 ```apex
-return ForgeAccess.leavingOutUnreadable().query(soql, binds);
+ForgeAccess.leavingOutUneditable().save(changes);
 ```
 
-The records then come back without `Amount`, and nothing is raised.
+The cast on `query` is there because Apex has no generic methods: a method that
+returns a list of any object returns `List<SObject>`. The list it returns is a
+`List<Opportunity>` underneath, so the cast always holds. The build proves this
+with a compile and a test before the sample is final.
 
 A test of the controller runs it as a user with the permission set it needs, as
 any user-mode test does. The platform adds no test setup of its own.
@@ -68,91 +72,119 @@ any user-mode test does. The platform adds no test setup of its own.
   removed-fields map.
 - `WITH USER_MODE` or `AccessLevel.USER_MODE` on each query and DML statement.
 - The error message, built by hand from the describe results.
-- A cast from `List<SObject>`: `query` returns a list of the queried object, as
-  `Database.query` does.
+- A savepoint and rollback around a save that both inserts and updates.
 
 ## What the platform does underneath
 
 ### Reading
 
-- `query(soql, binds)` runs `Database.queryWithBinds` in user mode, so the
-  user's object permissions, field permissions and sharing all apply.
-- When user mode refuses a field, Salesforce reports which ones
+- `query(soql, binds)` runs `Database.queryWithBinds` in user mode, so the user's
+  object permissions, field permissions and sharing apply to every object and
+  field in the query: the fields selected, the filters, the order, related
+  objects and subqueries.
+- When user mode refuses the query for access, Salesforce reports which fields
   (`QueryException.getInaccessibleFields()`). The platform raises
   `AccessDeniedException` with the first object and field in the message, and all
   of them available on the exception.
-- `leavingOutUnreadable().query(...)` first checks the object, and raises if the
-  user may not read it at all. It then runs the query in system mode, keeping the
-  sharing of the calling class, and removes the fields the user may not read with
-  `Security.stripInaccessible`. The fields it left out are available afterwards,
-  so a component can say what it did not show.
+- Any other query error, such as a mistake in the SOQL, is raised as the
+  `QueryException` Salesforce gives, unchanged.
+- There is no read that leaves out unreadable fields in this version. Running the
+  query in system mode and removing fields afterwards is weaker than user mode: a
+  filter or order on a hidden field still shapes the result, and the user can learn
+  its value by trying filters. A safe version needs the platform to build the
+  field list itself, which is the query builder in question 2.
 
 ### Saving
 
 - `save(records)` inserts the records that have no Id and updates the ones that
   have one. `remove(records)` deletes.
 - Before any DML it checks the object: may the user create, edit or delete it.
-- It then checks each field set on the records, with
-  `Security.stripInaccessible` and the matching access type. A field no user can
-  ever edit, such as `CreatedDate` or a formula, is ignored, because a record read
-  from the database carries such fields and the DML never writes them. A field the
-  user lacks permission to edit is refused, unless the developer asked to leave it
-  out with `leavingOutUneditable().save(...)`.
-- Last, it runs the DML in user mode, all or nothing, as a plain `insert` or
-  `update` does.
+- It then decides which fields each record writes (see the next section) and
+  checks them with `Security.stripInaccessible` and the matching access type. A
+  field the user may not edit is refused, unless the developer asked to leave it
+  out with `leavingOutUneditable()`, and the fields it left out are then on
+  `ForgeAccess.lastLeftOut()`. A field no user can ever edit, such as
+  `CreatedDate` or a formula, is never written and never refused; the platform
+  tells it apart from the user's own permissions by the field's describe
+  (`isPermissionable` and `isCalculated`), not by `isUpdateable`, which answers
+  for the running user.
+- It writes a new record per input record, holding the Id and only the fields it
+  decided to write, a cleared field included as null. So nothing the user did not
+  mean to change reaches the DML.
+- It runs the DML in user mode. A save that inserts and updates sets a savepoint
+  first, and rolls back both when either fails, so the save is all or nothing as
+  one plain `insert` or `update` is. After a rollback the new records have no Id
+  again.
 
-### Which fields count as changed
+### Which fields a save writes
 
-A record read and then saved carries every field the query returned. Checking all
-of them would refuse a save where the rep changed only the stage, because the
-record still holds an amount the rep may read but not edit. So the platform
-remembers what `query` returned in this transaction and checks only the fields
-that differ on save. A record it did not read, such as a new one or one sent back
-from a component, has every field set on it checked. Question 4 asks Will to
-choose this.
+- **A record this transaction read through `query`:** only the fields that differ
+  from what `query` returned. The platform remembers each record it returned, by
+  Id, for the rest of the transaction; a later `query` or `save` of the same
+  record replaces what it remembers. This is for Apex that reads, changes and
+  saves records in one transaction, such as a batch job or a trigger's follow-up
+  work.
+- **Any other record,** new or sent from a component: every field set on it. Over
+  Lightning the read and the save are two transactions, so the component sends
+  only what changed, as the scenario does. A component that sends whole records
+  back would have every field checked, and a read-only amount would refuse the
+  save.
+
+Question 4 asks Will to choose this.
 
 ### The error
 
-`ForgeAccess.AccessDeniedException` holds the object, the field and the kind of
+`ForgeAccess.AccessDeniedException` is raised only for a missing permission: the
+object and field checks before the DML, or a user-mode query or DML that
+Salesforce refuses for access. It holds the object, the field and the kind of
 access (read, create, edit or delete) that was missing. Its message is one
-sentence a user can read: "You cannot edit Opportunity.Amount." When several
-fields fail, the message names the first one and says how many more there are.
+sentence a user can read: "You cannot edit Opportunity.Amount.", or "You cannot
+read Opportunity." when the whole object is closed to the user. It names the
+object and field by their API names, which do not change with the user's language
+and are what an admin looks for in a permission set. When several fields fail, the
+message names the first one and says how many more there are. The build confirms
+in an org that a Lightning component receives this message as it is when the
+controller does not catch it; if it does not, that becomes a question for Will
+before the sample is final. A
+validation rule, a locked record or any other DML error is raised as the
+`DmlException` Salesforce gives, after the rollback.
 
 ## How it will be measured
 
 At 1, 200 and 2,000 Opportunities, as a Standard User with a permission set:
-`query` and then `save` through the platform, against the same work in plain
-user-mode Apex. The plain version does the same checks by hand. Measured: CPU,
-heap, queries, DML, and the consumer lines for the scenario's controller in both
-versions. The describe and strip calls are where the cost will be; heap grows with
-the remembered values from the previous section.
+`query`, a stage-only change in the same transaction, then `save`, against the
+same work in plain user-mode Apex with the same checks written by hand. Also
+`save` of records holding only an Id and a changed stage, as the table sends.
+Measured: CPU, heap, queries, DML, and the consumer lines for the scenario's
+controller in both versions. The describe and strip calls are where the cost will
+be; heap grows with the remembered records, and a mixed save spends one more DML
+statement on the savepoint.
 
 ## Questions for Will
 
 1. **Name.** `ForgeAccess` (recommended), `ForgeSecurity` or `ForgeUserMode`.
 2. **How a query is written.** A SOQL string with a map of binds, as above
-   (recommended). The other choice is a small query builder, which is larger and
-   is its own module. Static SOQL in brackets cannot be passed to the platform
-   before it runs.
-3. **What happens by default when a field fails.** Refuse with the error
+   (recommended for now). The other choice is a small query builder, which is
+   larger and is its own module; it would also make a safe read that leaves out
+   unreadable fields possible.
+3. **What happens by default when a field fails on save.** Refuse with the error
    (recommended), with leaving it out as the explicit choice. The opposite default
-   quietly hands business logic records with missing fields.
-4. **Saving records read earlier.** Check only the fields that changed since
-   `query` read them (recommended), or check every field set on the record.
+   quietly drops a user's change.
+4. **Saving records read earlier in the same transaction.** Write only the fields
+   that changed since `query` read them (recommended), or write every field set on
+   the record.
 5. **One `save` or separate verbs.** One `save` that inserts or updates by Id, plus
-   `remove` (recommended), or `insert`, `update` and `remove` as in plain Apex.
+   `remove` (recommended), or `insert`, `update` and `remove` as in plain Apex,
+   which would also need no savepoint.
 6. **Partial success.** All or nothing, as plain DML (recommended), or save what
    passes and report the rest, as `Database.update(records, false)` does.
-7. **Filters when leaving fields out.** In `leavingOutUnreadable()`, the
-   platform cannot see which fields the `WHERE` and `ORDER BY` use, so a query can
-   filter on a field the user may not read. Accept it and say so in the method's
-   purpose line (recommended), or offer leaving out on saves only.
 
 ## Decisions already taken
 
-- **User mode always.** No system-mode switch in this module; code that needs
+- **User mode always.** Every query and DML statement runs in user mode. No
+  system-mode switch and no system-mode read in this module; code that needs
   system mode uses plain Apex where it is visible.
-- **Sharing comes from Salesforce,** through user mode or the calling class's
-  sharing. The platform adds no sharing logic of its own.
+- **Sharing comes from Salesforce,** through user mode. The platform adds no
+  sharing logic of its own.
 - **ForgeIntegration unchanged** in the first version. It already reads and saves
   in user mode; whether it moves onto this module is a later choice.
