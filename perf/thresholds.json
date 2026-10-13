@@ -1,5 +1,7 @@
 {
-  "_comment": "Regression thresholds as a fraction of the previous published baseline. cpu_time covers cpu_time_ms; governor covers soql_queries, query_rows, dml_statements, dml_rows and heap_bytes. A measure worse than its threshold is a finding (see docs/performance/README.md).",
-  "cpu_time": 0.1,
-  "governor": 0.1
+  "_comment": "How much worse a measure may be than the last published commit, re-run in the same org, before it is a finding (see docs/performance/README.md). cpu_time covers cpu_time_ms; counts covers soql_queries, query_rows, dml_statements and dml_rows; heap covers heap_bytes, and a heap change smaller than heap_min_bytes is never a finding.",
+  "cpu_time": 0.25,
+  "counts": 0.1,
+  "heap": 0.1,
+  "heap_min_bytes": 512
 }

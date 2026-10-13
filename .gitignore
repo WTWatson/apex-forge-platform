@@ -55,3 +55,5 @@ target/
 **/tsconfig*.json
 **/*.tsbuildinfo
 **/graphql.config.yml
+# Same-org baseline passes of the benchmark runner
+perf/.same-org/
