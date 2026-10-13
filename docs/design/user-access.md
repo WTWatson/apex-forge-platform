@@ -103,18 +103,24 @@ any user-mode test does. The platform adds no test setup of its own.
   checks them with `Security.stripInaccessible` and the matching access type. A
   field the user may not edit is refused, unless the developer asked to leave it
   out with `leavingOutUneditable()`, and the fields it left out are then on
-  `ForgeAccess.lastLeftOut()`. A field no user can ever edit, such as
-  `CreatedDate` or a formula, is never written and never refused; the platform
-  tells it apart from the user's own permissions by the field's describe
-  (`isPermissionable` and `isCalculated`), not by `isUpdateable`, which answers
-  for the running user.
+  `ForgeAccess.lastLeftOut()`.
+- A short, fixed list of fields that Salesforce itself maintains is never written
+  and never refused: the Id, the audit fields (`CreatedDate`, `CreatedById`,
+  `LastModifiedDate`, `LastModifiedById`, `SystemModstamp`), formula and roll-up
+  fields, and auto-numbers. A record read from the database carries them, and the
+  user did not set them. The build proves each kind in an org. Every other field
+  is written, and user-mode DML decides whether the user may: a field whose access
+  cannot be set in a permission set but that the user may still write, such as a
+  required field, is not dropped. A field that can be set on create but not on
+  update is refused on update with the same error.
 - It writes a new record per input record, holding the Id and only the fields it
   decided to write, a cleared field included as null. So nothing the user did not
-  mean to change reaches the DML.
+  mean to change reaches the DML. When the save succeeds, each new Id is set on
+  the developer's own record.
 - It runs the DML in user mode. A save that inserts and updates sets a savepoint
   first, and rolls back both when either fails, so the save is all or nothing as
-  one plain `insert` or `update` is. After a rollback the new records have no Id
-  again.
+  one plain `insert` or `update` is. After a rollback no Id is set on the
+  developer's records.
 
 ### Which fields a save writes
 
@@ -144,10 +150,16 @@ object and field by their API names, which do not change with the user's languag
 and are what an admin looks for in a permission set. When several fields fail, the
 message names the first one and says how many more there are. The build confirms
 in an org that a Lightning component receives this message as it is when the
-controller does not catch it; if it does not, that becomes a question for Will
-before the sample is final. A
-validation rule, a locked record or any other DML error is raised as the
+controller does not catch it; if the message does not arrive, that becomes a
+question for Will before the sample is final.
+
+A validation rule, a locked record or any other DML error is raised as the
 `DmlException` Salesforce gives, after the rollback.
+
+The build's tests cover each kind of field above: a writable field whose access a
+permission set cannot change, an audit field, a formula and an auto-number, a
+field writable on create but not on update, and an ordinary field the user's
+permission sets deny.
 
 ## How it will be measured
 
