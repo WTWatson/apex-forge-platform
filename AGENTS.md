@@ -25,6 +25,9 @@ Salesforce DX project. Source lives in force-app/main/default.
 - No SeeAllData=true. Build test data in the test or a factory class.
 
 ## Verification
+- Deploy both source folders to your own scratch org; the tests need the trigger in
+  `test-support`, which consumer orgs never receive:
+  `sf project deploy start -o <your-org> --source-dir force-app --source-dir test-support`.
 - Run the Apex tests in your own scratch org:
   `sf apex run test -o <your-org> --test-level RunLocalTests --code-coverage --wait 20`.
   A change is not done until that run passes, and its results go in the pull request.

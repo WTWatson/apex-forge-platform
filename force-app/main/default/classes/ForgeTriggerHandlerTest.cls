@@ -154,4 +154,141 @@ private class ForgeTriggerHandlerTest {
         ForgeTriggerDispatcher.run(new List<ForgeTriggerHandler>{ h1, h2 });
         ForgeTriggerHandler.clearAllBypasses();
     }
+
+    // The tests below call handle() directly, as a trigger would, so they need no trigger.
+    // ForgeTriggerHandlerOnProductTest in test-support runs the same rules through a real one.
+
+    private class RunCountingHandler extends ForgeTriggerHandler {
+        public Integer runs = 0;
+
+        protected override void onTrigger(ForgeTriggerContext ctx) {
+            runs++;
+        }
+    }
+
+    private class SelfCallingHandler extends ForgeTriggerHandler {
+        private final Integer maxReEntries;
+        public Integer runs = 0;
+
+        SelfCallingHandler(Integer maxReEntries) {
+            this.maxReEntries = maxReEntries;
+        }
+
+        public override Integer getMaxReEntries() {
+            return maxReEntries;
+        }
+
+        protected override void onTrigger(ForgeTriggerContext ctx) {
+            runs++;
+            handle();
+        }
+    }
+
+    private class FailOnceHandler extends ForgeTriggerHandler {
+        public Boolean failNextRun = true;
+        public Integer completedRuns = 0;
+
+        protected override void onTrigger(ForgeTriggerContext ctx) {
+            if (failNextRun) {
+                failNextRun = false;
+                throw new IllegalArgumentException('Failing on purpose');
+            }
+            completedRuns++;
+        }
+    }
+
+    @IsTest
+    static void runsOneAfterAnotherAllGoAhead()
+    {
+        RunCountingHandler handler = new RunCountingHandler();
+
+        Test.startTest();
+        handler.handle();
+        handler.handle();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(3, handler.runs,
+            'Runs that follow one another are not re-entry and should all go ahead');
+        Assert.areEqual(3, ForgeTriggerHandler.getRunCount('RunCountingHandler'),
+            'The run count should count every run that happened');
+    }
+
+    @IsTest
+    static void handlerCallingItselfIsStoppedAtTheDefaultLimit()
+    {
+        SelfCallingHandler handler = new SelfCallingHandler(1);
+
+        Test.startTest();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(1, handler.runs,
+            'With the default limit the handler should not run inside its own run');
+    }
+
+    @IsTest
+    static void raisingTheLimitAllowsOneMoreNestedLevel()
+    {
+        SelfCallingHandler handler = new SelfCallingHandler(2);
+
+        Test.startTest();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(2, handler.runs,
+            'A limit of two should allow exactly one nested run');
+    }
+
+    @IsTest
+    static void handlerStoppedFromNestingStillRunsNextTime()
+    {
+        SelfCallingHandler handler = new SelfCallingHandler(1);
+
+        Test.startTest();
+        handler.handle();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(2, handler.runs,
+            'Each outer run should go ahead once the previous one has finished');
+    }
+
+    @IsTest
+    static void bypassWinsOverEveryRun()
+    {
+        RunCountingHandler handler = new RunCountingHandler();
+        ForgeTriggerHandler.bypass('RunCountingHandler');
+
+        Test.startTest();
+        handler.handle();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(0, handler.runs, 'A bypassed handler should not run');
+        Assert.areEqual(0, ForgeTriggerHandler.getRunCount('RunCountingHandler'),
+            'A bypassed handler should record no runs');
+    }
+
+    @IsTest
+    static void handlerRunsAgainAfterAFailedRun()
+    {
+        FailOnceHandler handler = new FailOnceHandler();
+
+        Test.startTest();
+        try
+        {
+            handler.handle();
+            Assert.fail('The first run should fail');
+        }
+        catch (IllegalArgumentException e)
+        {
+            Assert.areEqual('Failing on purpose', e.getMessage());
+        }
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(1, handler.completedRuns,
+            'A failed run should not leave the handler counted as still running');
+    }
 }
