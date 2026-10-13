@@ -20,6 +20,7 @@ public abstract with sharing class ForgeIntegration {
 
     private transient String currentCallKey;
     private transient Integer connectionsOpened;
+    private transient List<ForgeHttp.Connection> callConnections;
     private transient Integer longestWaitSeconds;
 
     /** Sends these records to the other system in a background job after the current transaction; never calls out in the caller's transaction. */
@@ -69,6 +70,7 @@ public abstract with sharing class ForgeIntegration {
         ForgeHttp.Connection opened = ForgeHttp.connection(namedCredential)
             .idempotencyKey(connectionsOpened == 1 ? currentCallKey : currentCallKey + '-c' + connectionsOpened);
         longestWaitSeconds = Math.max(longestWaitSeconds, opened.waitsUpToSeconds());
+        callConnections.add(opened);
         return opened;
     }
 
@@ -182,6 +184,7 @@ public abstract with sharing class ForgeIntegration {
 
         currentCallKey = call.key;
         connectionsOpened = 0;
+        callConnections = new List<ForgeHttp.Connection>();
         try
         {
             run(records);
@@ -204,6 +207,23 @@ public abstract with sharing class ForgeIntegration {
         {
             outcome.addFailure(call.recordIds, null, null, 'The call could not be sent: ' + notSent.getMessage());
         }
+        catch (Exception unexpected)
+        {
+            // A request no test described must fail that test, not become a failure record.
+            if (unexpected.getTypeName() == 'ForgeHttpMock.UnmatchedRequestException') { throw unexpected; }
+            ForgeHttp.Response reply = lastReplyOfThisCall();
+            String reason = 'The integration failed while handling the reply: ' + unexpected.getTypeName() + ': ' + unexpected.getMessage();
+            outcome.addFailure(call.recordIds, reply?.status, reply?.body, reason);
+        }
+    }
+
+    private ForgeHttp.Response lastReplyOfThisCall()
+    {
+        for (Integer i = callConnections.size() - 1; i >= 0; i--)
+        {
+            if (callConnections[i].lastReply() != null) { return callConnections[i].lastReply(); }
+        }
+        return null;
     }
 
     private static Boolean isSafeToRepeat(String method)

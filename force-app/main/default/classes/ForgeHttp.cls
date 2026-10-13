@@ -27,6 +27,7 @@ public with sharing class ForgeHttp {
         private Boolean acceptsAnyStatus = false;
         private String idempotencyKey;
         private Integer requestsSent = 0;
+        private Response lastReply;
 
         private Connection(String namedCredential)
         {
@@ -51,6 +52,12 @@ public with sharing class ForgeHttp {
         {
             this.idempotencyKey = key;
             return this;
+        }
+
+        /** The last answer the other system gave on this connection, or null before the first. */
+        public Response lastReply()
+        {
+            return lastReply;
         }
 
         /** Hands back every reply as it came, instead of raising a failure for a status outside 200 to 299. */
@@ -96,6 +103,7 @@ public with sharing class ForgeHttp {
             try
             {
                 response = new Response(new Http().send(buildRequest(method, path, body)));
+                lastReply = response;
             }
             catch (CalloutException timeout)
             {

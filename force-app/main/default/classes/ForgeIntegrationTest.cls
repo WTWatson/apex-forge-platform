@@ -63,6 +63,17 @@ private class ForgeIntegrationTest
         }
     }
 
+    /** Reads each customer's credit rating from the ERP's JSON; a reply in another shape makes run() throw. */
+    private class ReadCreditRatingsFromJson extends ForgeIntegration
+    {
+        protected override void run(List<SObject> records)
+        {
+            Account account = (Account) records[0];
+            String reply = connection(ERP).get('/ratings/' + account.Id).body;
+            account.Rating = (String) ((Map<String, Object>) JSON.deserializeUntyped(reply)).get('rating');
+        }
+    }
+
     /** Asks the ERP about a path no test describes. */
     private class AskSomethingUndescribed extends ForgeIntegration
     {
@@ -254,6 +265,28 @@ private class ForgeIntegrationTest
         Assert.isTrue(failure.Reply_Body__c.contains('"AccountNumber":"ERP C-1"'), failure.Reply_Body__c);
         Assert.isTrue(failure.Reason__c.startsWith('The reply arrived but the record could not be saved: '), failure.Reason__c);
         Assert.areEqual(1, [SELECT COUNT() FROM Task], 'afterCalls gets only the records that saved');
+    }
+
+    @IsTest
+    static void aCallWhoseRunThrowsBecomesAFailureRecordAndTheOthersAreSaved()
+    {
+        List<Account> accounts = newAccounts(2);
+        Account readable = accounts[0];
+        Account unreadable = accounts[1];
+        ForgeHttpMock.connection(ERP).get('/ratings/' + readable.Id).reply(200, '{"rating":"Hot"}');
+        ForgeHttpMock.connection(ERP).get('/ratings/' + unreadable.Id).reply(200, '["Hot"]');
+
+        Test.startTest();
+        ForgeIntegration.start(new ReadCreditRatingsFromJson(), accounts);
+        Test.stopTest();
+
+        Assert.areEqual('Hot', [SELECT Rating FROM Account WHERE Id = :readable.Id].Rating);
+        Assert.isNull([SELECT Rating FROM Account WHERE Id = :unreadable.Id].Rating);
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(unreadable.Id, failure.Record_Ids__c);
+        Assert.areEqual(200, failure.Status__c);
+        Assert.areEqual('["Hot"]', failure.Reply_Body__c);
+        Assert.isTrue(failure.Reason__c.startsWith('The integration failed while handling the reply: System.TypeException: '), failure.Reason__c);
     }
 
     @IsTest
