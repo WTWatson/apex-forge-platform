@@ -14,13 +14,13 @@ public virtual with sharing class ForgeTriggerHandler {
     /** How many times this handler may run in one transaction; override it to allow re-entry. */
     public virtual Integer getMaxReEntries() { return 1; }
 
-    /** Switches the named handler off for the rest of the transaction, until its bypass is cleared. */
+    /** Switches off the handler with this class name for the rest of the transaction, until its bypass is cleared. */
     public static void bypass(String handlerName)
     {
         bypassedHandlers.add(handlerName);
     }
 
-    /** Switches the named handler back on after a bypass. */
+    /** Switches the handler with this class name back on after a bypass. */
     public static void clearBypass(String handlerName)
     {
         bypassedHandlers.remove(handlerName);
@@ -32,13 +32,13 @@ public virtual with sharing class ForgeTriggerHandler {
         bypassedHandlers.clear();
     }
 
-    /** Tells whether the named handler is switched off. */
+    /** Tells whether the handler with this class name is switched off. */
     public static Boolean isBypassed(String handlerName)
     {
         return bypassedHandlers.contains(handlerName);
     }
 
-    /** Tells how many times the named handler has run in this transaction. */
+    /** Tells how many times the handler with this class name has run in this transaction. */
     public static Integer getRunCount(String handlerName)
     {
         return runCounts.get(handlerName) == null ? 0 : runCounts.get(handlerName);
