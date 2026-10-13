@@ -203,14 +203,34 @@ private class SendCustomersToErpTest
         }
     }
 
+    // The number is saved in user mode, so the test runs as a seller who may edit it.
     @IsTest
     static void newCustomersGetTheirErpNumber()
     {
         Test.setMock(HttpCalloutMock.class, new ErpGivesOneNumber());
+        User seller = new User(
+            ProfileId = [SELECT Id FROM Profile WHERE Name = 'Standard User'].Id,
+            LastName = 'Seller',
+            Alias = 'seller',
+            Email = 'seller@example.com',
+            Username = 'seller' + System.currentTimeMillis() + '@example.com',
+            TimeZoneSidKey = 'Europe/London',
+            LocaleSidKey = 'en_GB',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+        insert seller;
+        insert new PermissionSetAssignment(
+            AssigneeId = seller.Id,
+            PermissionSetId = [SELECT Id FROM PermissionSet WHERE Name = 'Forge_Test_Erp_Customer_Number'].Id
+        );
 
-        Test.startTest();
-        insert new Account(Name = 'Acme Ltd');
-        Test.stopTest();
+        System.runAs(seller)
+        {
+            Test.startTest();
+            insert new Account(Name = 'Acme Ltd');
+            Test.stopTest();
+        }
 
         Assert.areEqual('C-1001', [SELECT Erp_Customer_Number__c FROM Account].Erp_Customer_Number__c);
     }
