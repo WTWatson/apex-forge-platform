@@ -5,6 +5,7 @@ module ships as one pull request with its tests, its consumer sample
 (`perf/scenarios/<module>/`) and its numbers in `docs/performance/`.
 
 ## Shipped
+
 - **Trigger handler framework**: `ForgeTriggerHandler`, `ForgeTriggerDispatcher`,
   `ForgeTriggerContext`. Ordered execution, a recursion guard and a bypass API; one
   trigger per object, no logic in the trigger.
@@ -12,6 +13,7 @@ module ships as one pull request with its tests, its consumer sample
   sample data without boilerplate.
 
 ## Next, in order
+
 _The maintainer sets this order. Each module gets a short design note in
 `docs/design/<module>.md` before any code is written._
 
