@@ -32,7 +32,9 @@ public with sharing class ForgeDataBuilder {
     /** Tells whether the field is a field of the given object type. */
     public static Boolean fieldBelongsTo(SObjectType objectType, SObjectField field)
     {
-        return objectType.getDescribe().fields.getMap().get(String.valueOf(field)) == field;
+        Map<String, SObjectField> fields =
+            objectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
+        return fields.get(String.valueOf(field)) == field;
     }
 
     /** Collects the field values and the record count for one set of test records, then builds or inserts them. */
@@ -151,7 +153,9 @@ public with sharing class ForgeDataBuilder {
         private List<Schema.DescribeFieldResult> requiredFieldsToFill()
         {
             List<Schema.DescribeFieldResult> toFill = new List<Schema.DescribeFieldResult>();
-            for (SObjectField field : objectType.getDescribe().fields.getMap().values()) {
+            Map<String, SObjectField> fields =
+                objectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
+            for (SObjectField field : fields.values()) {
                 if (fieldValues.containsKey(field)) { continue; }
                 Schema.DescribeFieldResult describe = field.getDescribe();
                 if (!describe.isCreateable()) { continue; }
