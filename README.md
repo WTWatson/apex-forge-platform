@@ -44,8 +44,6 @@ trigger LeadTrigger on Lead(before insert, before update) {
   `ForgeTriggerDispatcher.run(new List<ForgeTriggerHandler>{ first, second })`.
 - `ForgeTriggerHandler.bypass('LeadRatingHandler')` switches a handler off for the
   rest of the transaction, and `clearBypass` switches it back on.
-- In a test, `ForgeTriggerContext.forInsert(records)` and its siblings let you run a
-  handler without a trigger.
 
 ### Data builder and seeder
 
@@ -90,12 +88,18 @@ public with sharing class SendCustomersToErp extends ForgeIntegration {
 
   protected override Integer recordsPerCall() { return 50; }
 
+  /** The ERP recognises a customer it already has, so a repeated call is safe. */
   protected override Boolean repeatsAreSafe() { return true; }
 }
 ```
 
 `ErpCustomer` and `ErpCustomerNumber` are two small classes shaped like the ERP's
-JSON. A trigger handler starts the integration with
+JSON. They, the `Erp_Customer_Number__c` field and this class are your code, not
+part of the platform: create the field, and give the users who create Accounts
+edit access to it and access to the Named Credential's external credential.
+
+The integration starts after the records are saved, because it needs their Ids. A
+trigger handler starts it on after insert with
 `ForgeIntegration.start(new SendCustomersToErp(), ctx.newRecords);`. A test
 describes the ERP's reply in one line:
 
@@ -103,6 +107,9 @@ describes the ERP's reply in one line:
 ForgeHttpMock.connection('ERP').post('/customers').reply(201, '[{"customerNumber":"C-1001"}]');
 ```
 
+- `repeatsAreSafe()` is false unless you override it. Leave it false for a call
+  that creates or changes data, unless the other system recognises a repeat, as
+  this ERP does by the Salesforce Id.
 - It runs as the user who started it, in user mode, unless the integration
   overrides `accessLevel()`.
 - A call that fails becomes an `Integration_Failure__c` record with the reason,
@@ -111,8 +118,8 @@ ForgeHttpMock.connection('ERP').post('/customers').reply(201, '[{"customerNumber
 - To call another system directly, outside a trigger,
   `ForgeHttp.connection('ERP').get('/customers/C-1001')` returns the reply.
 
-The full samples, with their tests and the same task written in plain Apex for
-comparison, are in [perf/scenarios](perf/scenarios). The design behind ForgeHttp
+The full samples, each with the same task written in plain Apex for comparison,
+are in [perf/scenarios](perf/scenarios). The design behind ForgeHttp
 is in [docs/design/forge-http.md](docs/design/forge-http.md).
 
 ## Install it in your org
@@ -127,8 +134,10 @@ cd apex-forge-platform
 sf project deploy start --source-dir force-app -o <your-org>
 ```
 
-`force-app` is everything your org needs. For ForgeHttp, also create a Named
-Credential for each system you call; your code refers to it by name.
+`force-app` is everything the platform needs, at API version 66.0. For ForgeHttp,
+also create a Named Credential for each system you call; your code refers to it by
+name. A deploy to production runs your org's own tests, so deploy to a sandbox
+first.
 
 ## Run the tests
 
