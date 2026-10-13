@@ -14,7 +14,7 @@ Each module has one table. Each row is one run of the module on a number of reco
 | Column     | What it means                                                                        |
 | ---------- | ------------------------------------------------------------------------------------ |
 | CPU ms     | Apex CPU time used, in milliseconds. The limit is 10,000 in a normal transaction.    |
-| Heap       | Memory used, in bytes. The limit is 6 MB in a normal transaction.                    |
+| Heap       | Memory the measured call added, in bytes. The limit is 6 MB in a normal transaction. |
 | SOQL       | Number of queries run. The limit is 100.                                             |
 | Query rows | Records those queries returned. The limit is 50,000.                                 |
 | DML        | Number of insert, update or delete statements. The limit is 150.                     |
@@ -32,12 +32,18 @@ side by side.
 - A benchmark drives the module's public methods the way your code would.
 - Each module is measured in its own fresh scratch org, five times. The table shows
   the middle (median) value, so one slow run doesn't skew it.
-- Heap is the exception: the table shows the largest of the five runs. Salesforce
-  sometimes counts less memory than a run really holds, but never more, so the
-  largest run is the one counted in full.
+- Heap is the memory the measured call added: the heap just after the call minus
+  the heap just before it. Records the benchmark builds before the call are not in
+  it, and neither is memory the call uses and frees again.
+- For heap the table shows the largest of the five runs, not the median. Salesforce
+  sometimes counts less memory than a run holds, and has not been seen to count
+  more. Even the largest run can read low, if all five were counted short.
+- A size is published only if every run handled all its records. Otherwise its row
+  reads "Not published yet" and it is not compared with any other run.
 - Each run's results file, `docs/performance/results/<date>-<commit>.json`, keeps
   all five runs under `runs`, and the published value of each measure under
-  `median` (heap under `largest`).
+  `median` (heap under `largest`). A size that is not published is marked
+  `"complete": false` and keeps only its runs.
 
 ## When a change counts as slower
 

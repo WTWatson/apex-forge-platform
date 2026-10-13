@@ -20,8 +20,12 @@ would, at 1, 200 and 2,000 records. The published numbers are in
   where it keeps the largest run; `docs/performance/README.md` says why. It writes
   the five runs and the kept values to
   `docs/performance/results/<date>-<commit>.json`. It prints the README rows, the
-  change against the previous results file and any measure over
-  `thresholds.json`.
+  change against the last earlier run and any measure over `thresholds.json`.
+- A scenario where any run handled fewer records than it was given is not
+  published or compared. Its runs stay in the results file, marked
+  `"complete": false`.
+- `node perf/run-benchmarks.js --rebuild <results file>` works the kept values out
+  again from the runs already in a results file. It needs no org.
 
 ```bash
 sf org create scratch -f config/project-scratch-def.json --target-dev-hub <dev-hub> --alias <org> -y 1
