@@ -10,6 +10,7 @@ public virtual with sharing class ForgeTriggerHandler {
 
     private static final Map<String, Integer> runCounts = new Map<String, Integer>();
     private static final Set<String> bypassedHandlers = new Set<String>();
+    private static final Map<String, Integer> activeDepths = new Map<String, Integer>();
 
     public virtual Integer getMaxReEntries() { return 1; }
 
@@ -46,18 +47,31 @@ public virtual with sharing class ForgeTriggerHandler {
     public void handle()
     {
         String handlerName = String.valueOf(this).split(':')[0];
-        Integer count = getRunCount(handlerName);
+        Integer depth = getActiveDepth(handlerName);
 
         if (isBypassed(handlerName)) { return; }
-        if (count >= getMaxReEntries()) { return; }
+        if (depth >= getMaxReEntries()) { return; }
 
-        runCounts.put(handlerName, count + 1);
+        runCounts.put(handlerName, getRunCount(handlerName) + 1);
+        activeDepths.put(handlerName, depth + 1);
 
         ForgeTriggerContext ctx = new ForgeTriggerContext(
             Trigger.operationType, Trigger.new, Trigger.newMap, Trigger.old, Trigger.oldMap
         );
 
-        onTrigger(ctx);
+        try
+        {
+            onTrigger(ctx);
+        }
+        finally
+        {
+            activeDepths.put(handlerName, depth);
+        }
+    }
+
+    private static Integer getActiveDepth(String handlerName)
+    {
+        return activeDepths.get(handlerName) == null ? 0 : activeDepths.get(handlerName);
     }
 
     protected virtual void onTrigger(ForgeTriggerContext ctx) {}
