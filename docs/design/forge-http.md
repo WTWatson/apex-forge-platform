@@ -25,8 +25,8 @@ public with sharing class SendCustomersToErp extends ForgeIntegration {
     protected override void run(List<SObject> records) {
         List<Account> accounts = (List<Account>) records;
         List<ErpCustomerNumber> numbers = (List<ErpCustomerNumber>) connection('ERP')
-            .post('/customers', ErpCustomer.from(accounts))
-            .as(List<ErpCustomerNumber>.class);
+            .post('/customers', ErpCustomer.fromAccounts(accounts))
+            .bodyAs(List<ErpCustomerNumber>.class);
         for (Integer i = 0; i < accounts.size(); i++) {
             accounts[i].Erp_Customer_Number__c = numbers[i].customerNumber;
         }
@@ -42,7 +42,7 @@ platform moves it out of the transaction):
 
 ```apex
 protected override void onTrigger(ForgeTriggerContext ctx) {
-    if (ctx.isAfter && ctx.isInsert) {
+    if (ctx.operationType == System.TriggerOperation.AFTER_INSERT) {
         ForgeIntegration.start(new SendCustomersToErp(), ctx.newRecords);
     }
 }
@@ -78,25 +78,35 @@ limit, retry loops, an `HttpCalloutMock` class per test.
 
 - **`ForgeHttp.Connection`** (`connection('ERP')`): a Named Credential by name; the
   endpoint is `callout:ERP` + path. No URLs, keys or tokens in code. `get`, `post`,
-  `put`, `patch`, `delete`; a body that is not a String is serialised to JSON with
+  `put`, `patch`, `deleteAt` (`delete` is reserved in Apex); a body that is not a String is serialised to JSON with
   `Content-Type: application/json`. Default timeout 30 s, settable per connection.
-- **`ForgeHttp.Response`**: status, body, headers; `as(Type)` deserialises the body.
+- **`ForgeHttp.Response`**: status, body, headers; `bodyAs(Type)` deserialises the body.
   A non-2xx reply throws `ForgeHttp.CalloutFailure` carrying status, body and the
   request's method and path, unless the consumer asks for the response as is.
 - **Retry**: on a timeout or 502/503/504, retried with backoff, across jobs (not by
   spinning in the transaction). Default 3 attempts.
-- **`ForgeIntegration`**: the unit a consumer writes. `start(integration, records)`
-  from any context: in a trigger or after DML it enqueues a Queueable with
-  `Database.AllowsCallouts` carrying the record Ids (re-queried in the job), split
-  into calls of `recordsPerCall()` and into jobs of at most 100 callouts; outside a
-  trigger with no pending DML it may run now. Bulk: 200 Accounts make 4 calls in one
-  job; 2,000 make 40 calls, still one job.
+- **`ForgeIntegration`**: the unit a consumer writes.
+  - `start(integration, records)` can be called from anywhere: a trigger, a
+    service class, an anonymous script.
+  - It always queues: it enqueues a Queueable with `Database.AllowsCallouts`
+    carrying the record Ids, and the job queries the records again. It never
+    calls out in the caller's transaction. In a test, `Test.stopTest()` runs it.
+  - The job splits the records into calls of `recordsPerCall()` and into jobs of
+    at most 100 callouts.
+  - Bulk: 200 Accounts make 4 calls in one job; 2,000 make 40 calls, still one job.
 - **Saving what the integration changed**: Apex refuses a callout after
   uncommitted DML in the same transaction, so `run` makes no DML. It changes fields
   on the records it was given; after the job's last call the platform updates those
   records once (one DML for the whole job, so 2,000 Accounts are one update, which
-  runs the Account trigger with the integration's own start suppressed). A consumer
-  who needs other DML says so with `afterCalls(...)`.
+  runs the Account trigger; the platform switches that integration off during its
+  own update, so saving the records does not start it again). A consumer who needs
+  other DML overrides `afterCalls`, which runs after that save:
+  ```apex
+  /** Tells the account owners their customers now exist in the ERP. */
+  protected override void afterCalls(List<SObject> records) {
+      insert ErpWelcomeTask.forEach((List<Account>) records);
+  }
+  ```
 - **`ForgeHttpMock`**: a fluent test double installed with `Test.setMock` behind
   the scenes; routes by connection, method and path; an unmatched request fails the
   test with the request it saw.
@@ -105,7 +115,7 @@ limit, retry loops, an `HttpCalloutMock` class per test.
 - Works with the trigger handler's bypass: bypassing the Account handler also means
   no integration starts.
 
-## Measures (forge-perf)
+## How it will be measured
 
 At 1, 200 and 2,000 Accounts with the mock: CPU, heap, SOQL, DML, callouts (new
 column for this module), jobs enqueued; consumer lines for the scenario against the
