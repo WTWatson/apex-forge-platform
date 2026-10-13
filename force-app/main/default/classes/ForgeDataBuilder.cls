@@ -20,29 +20,36 @@
  */
 public with sharing class ForgeDataBuilder {
 
+    /** Raised when a builder is set up wrongly, such as with a field of another object or an unsaved parent. */
     public class ConfigException extends Exception {}
 
+    /** Supplies the value for the record at the given zero-based index, through get(index), when several are built at once. */
     public interface ValueProvider { Object get(Integer index); }
 
+    /** Starts building test records of the given object type. */
     public static Builder of(SObjectType t) { return new Builder(t); }
 
+    /** Tells whether the field is a field of the given object type. */
     public static Boolean fieldBelongsTo(SObjectType t, SObjectField f)
     {
         return t.getDescribe().fields.getMap().values().contains(f);
     }
 
+    /** Collects the field values and the record count for one set of test records, then builds or inserts them. */
     public class Builder {
         private final SObjectType sObjType;
         private final Map<SObjectField, Object> fieldValues = new Map<SObjectField, Object>();
         private Integer howMany = 1;
         private Boolean autoFillOn = true;
 
+        /** Starts a builder for the given object type; ForgeDataBuilder.of reads better in a test. */
         public Builder(SObjectType t)
         {
             if (t == null) { throw new ConfigException('SObjectType required'); }
             this.sObjType = t;
         }
 
+        /** Sets a field on every record, to one value or to a ValueProvider that supplies each record's value by its index. */
         public Builder with(SObjectField f, Object value)
         {
             if (f == null) { throw new ConfigException('field required'); }
@@ -53,6 +60,7 @@ public with sharing class ForgeDataBuilder {
             return this;
         }
 
+        /** Links every record to an already-saved parent record through the given lookup field. */
         public Builder parent(SObjectField fk, SObject parentRecord)
         {
             if (fk == null) { throw new ConfigException('FK field required'); }
@@ -72,6 +80,7 @@ public with sharing class ForgeDataBuilder {
             return with(fk, parentRecord.Id);
         }
 
+        /** Sets how many records to build; the default is one. */
         public Builder count(Integer n)
         {
             if (n == null || n < 1) { throw new ConfigException('count must be >= 1'); }
@@ -79,8 +88,10 @@ public with sharing class ForgeDataBuilder {
             return this;
         }
 
+        /** Turns on or off the filling of required fields with placeholder values; it is on by default. */
         public Builder autoFill(Boolean enabled) { this.autoFillOn = enabled; return this; }
 
+        /** Returns the one record without inserting it; use buildList when building more than one. */
         public SObject build()
         {
             if (howMany > 1) {
@@ -89,6 +100,7 @@ public with sharing class ForgeDataBuilder {
             return buildList()[0];
         }
 
+        /** Returns all the records without inserting them. */
         public List<SObject> buildList()
         {
             List<SObject> out = new List<SObject>();
@@ -109,6 +121,7 @@ public with sharing class ForgeDataBuilder {
             return out;
         }
 
+        /** Inserts the one record and returns it; use persistList when building more than one. */
         public SObject persist()
         {
             if (howMany > 1) {
@@ -119,6 +132,7 @@ public with sharing class ForgeDataBuilder {
             return rec;
         }
 
+        /** Inserts all the records and returns them. */
         public List<SObject> persistList()
         {
             List<SObject> recs = buildList();
