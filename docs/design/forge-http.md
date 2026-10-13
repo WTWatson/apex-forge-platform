@@ -83,9 +83,9 @@ limit, retry loops, an `HttpCalloutMock` class per test.
 
 - **`ForgeHttp.Connection`** (`connection('ERP')`): a Named Credential by name; the
   endpoint is `callout:ERP` + path. No URLs, keys or tokens in code. `get`, `post`,
-  `put`, `patch` and `remove` (Apex reserves `delete`); a body that is not a String
-  is serialised to JSON with
-  `Content-Type: application/json`. Default timeout 30 s, settable per connection.
+  `put`, `patch` and `remove` (Apex reserves `delete`). A body that is not a String
+  is serialised to JSON with `Content-Type: application/json`. The default timeout
+  is 30 s; `waitsUpToSeconds(n)` changes it for one connection.
 - **`ForgeHttp.Response`**: status, body, headers; `readAs(Type)` deserialises the body.
   A non-2xx reply throws `ForgeHttp.CalloutFailureException` (Apex requires the
   suffix) carrying the method, path, status (null on a timeout) and reply body;
@@ -97,7 +97,8 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   the caller's transaction. In a test, `Test.stopTest()` runs the job.
 - **`ForgeHttpMock`**: a fluent test double installed with `Test.setMock` behind
   the scenes; routes by connection, method and path; an unmatched request fails the
-  test with the request it saw. Tests of retries run the follow-on job directly,
+  test with the request it saw. Tests need no Named Credential in the org: the mock
+  answers `callout:ERP` itself. Tests of retries run the follow-on job directly,
   through a hook visible only to tests.
 - Sharing: `with sharing` throughout.
 - Works with the trigger handler's bypass: bypassing the Account handler also means
@@ -113,8 +114,11 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   100 calls and passes the rest to a follow-on job.
 - A transaction that is itself asynchronous (a Queueable, a batch `execute`, a
   future method) may queue only one job. There the first `start` queues; a second
-  `start` in the same transaction throws `ForgeIntegration.StartRefused`, which
-  says why. A batch with a scope of 200 or less starts once per `execute`.
+  `start` in the same transaction throws `ForgeIntegration.StartRefusedException`,
+  which says why. A batch can therefore start an integration once in each
+  `execute`, for that `execute`'s records.
+- `start` also refuses a record that has no Id yet, saying to start it after the
+  insert.
 
 ### Inside a job
 
@@ -130,18 +134,23 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   `remove` is retried by default. A POST or PATCH is retried only when the
   integration says `repeatsAreSafe()`, because the other system may have acted on a
   call whose reply was lost. Every call carries an `Idempotency-Key` header that
-  stays the same across retries of that call, for systems that honour it.
+  stays the same across retries of that call, for systems that honour it. When
+  `run` opens more than one connection, each request gets its own key.
 - **Completed calls are kept**: a call that succeeded is never sent again. After
   the job's last call, the platform saves the changes from every call that
   succeeded, even if a later call failed.
+- **An error in `run` itself**: if `run` throws for one call (say, a reply shorter
+  than expected), that call's records are not saved and get a failure record
+  holding the error and the reply. The job carries on with its other calls and
+  saves them as usual.
 - **Saving only what changed**: Apex refuses a callout after uncommitted DML in the
   same transaction, so `run` makes no DML. The platform compares each record after
-  `run` with the record it queried, and updates only the fields `run` changed.
-  Another user's edit to a different field during the job is kept; an edit to the
-  same field is overwritten. It saves all the job's records in one update with
-  partial success allowed. A record that fails to save gets a failure record
-  holding the reply for it, so the other system's answer (the customer number) is
-  not lost.
+  `run` with the record it queried, and updates only the fields `run` changed. It
+  saves all the job's records in one update with partial success allowed.
+- **Edits made during the job**: another user's edit to a different field is
+  kept; an edit to the same field is overwritten.
+- **A record that fails to save** gets a failure record holding the reply for it,
+  so the other system's answer (the customer number) is not lost.
 - **The trigger on that update**: the update runs the Account trigger. The
   platform switches off only that integration while it saves, so the save does not
   start it again; the object's other trigger logic runs as usual.
