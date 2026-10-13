@@ -20,6 +20,19 @@ private class ForgeHttpTest {
         public String customerNumber;
     }
 
+    /** Remembers each request it is asked about, and stops any request when told to. */
+    private class RememberRequests implements ForgeHttp.RequestCheck
+    {
+        private final List<String> asked = new List<String>();
+        private Boolean stopsRequests = false;
+
+        public void beforeSending(String method, Integer timeoutSeconds)
+        {
+            asked.add(method + ' ' + timeoutSeconds);
+            if (stopsRequests) { throw new IllegalArgumentException('stopped'); }
+        }
+    }
+
     @IsTest
     static void getReturnsStatusBodyAndHeaders()
     {
@@ -87,8 +100,8 @@ private class ForgeHttpTest {
     @IsTest
     static void aConnectionWaitsThirtySecondsUnlessToldOtherwise()
     {
-        Assert.areEqual(30, ForgeHttp.connection(SYSTEM_NAME).waitsUpToSeconds());
-        Assert.areEqual(5, ForgeHttp.connection(SYSTEM_NAME).timeoutSeconds(5).waitsUpToSeconds());
+        Assert.areEqual(30, ForgeHttp.connection(SYSTEM_NAME).timeoutSeconds());
+        Assert.areEqual(5, ForgeHttp.connection(SYSTEM_NAME).waitsUpToSeconds(5).timeoutSeconds());
     }
 
     @IsTest
@@ -251,6 +264,44 @@ private class ForgeHttpTest {
         Assert.areEqual('order-7', orders.requests()[0].getHeader('Idempotency-Key'));
         Assert.areEqual('order-7-2', orders.requests()[1].getHeader('Idempotency-Key'));
         Assert.isNull(orders.requests()[2].getHeader('Idempotency-Key'), 'no key unless one is given');
+    }
+
+    @IsTest
+    static void waitsUpToSecondsSetsTheTimeoutTheRequestIsSentWith()
+    {
+        ForgeHttpMock.connection(SYSTEM_NAME).get('/customers/C-1').reply(200, '');
+        RememberRequests check = new RememberRequests();
+
+        Test.startTest();
+        ForgeHttp.Connection erp = ForgeHttp.connection(SYSTEM_NAME).checkingEachRequestWith(check);
+        erp.waitsUpToSeconds(60);
+        erp.get('/customers/C-1');
+        Test.stopTest();
+
+        // HttpRequest has no getter for its timeout; the check is given the value the request was set to.
+        Assert.areEqual(new List<String>{ 'GET 60' }, check.asked, 'the timeout is read when the request is sent');
+    }
+
+    @IsTest
+    static void aRequestTheCheckStopsIsNotSent()
+    {
+        ForgeHttpMock.Route customers = ForgeHttpMock.connection(SYSTEM_NAME).post('/customers').reply(201, '');
+        RememberRequests check = new RememberRequests();
+        check.stopsRequests = true;
+
+        Test.startTest();
+        try
+        {
+            ForgeHttp.connection(SYSTEM_NAME).checkingEachRequestWith(check).post('/customers', 'Acme');
+            Assert.fail('the check stops the request');
+        }
+        catch (IllegalArgumentException stopped)
+        {
+            Assert.areEqual('stopped', stopped.getMessage());
+        }
+        Test.stopTest();
+
+        Assert.areEqual(0, customers.requests().size());
     }
 
     private static ForgeHttp.CalloutFailureException failureOf(String path)

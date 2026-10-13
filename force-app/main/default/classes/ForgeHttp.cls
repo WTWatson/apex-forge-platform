@@ -28,6 +28,7 @@ public with sharing class ForgeHttp {
         private String idempotencyKey;
         private Integer requestsSent = 0;
         private Response lastReply;
+        private RequestCheck check;
 
         private Connection(String namedCredential)
         {
@@ -35,16 +36,23 @@ public with sharing class ForgeHttp {
         }
 
         /** Waits this many seconds for the other system to answer before giving up; 30 unless set. */
-        public Connection timeoutSeconds(Integer seconds)
+        public Connection waitsUpToSeconds(Integer seconds)
         {
             this.waitSeconds = seconds;
             return this;
         }
 
         /** How many seconds this connection waits for an answer before giving up. */
-        public Integer waitsUpToSeconds()
+        public Integer timeoutSeconds()
         {
             return waitSeconds;
+        }
+
+        /** Asks this check before each request is sent, with the timeout the request will have; ForgeIntegration uses it to keep a job inside its callout limits. */
+        public Connection checkingEachRequestWith(RequestCheck check)
+        {
+            this.check = check;
+            return this;
         }
 
         /** Sends this key as the Idempotency-Key header, so a system that honours it acts on a repeated request only once; later requests on the connection get the key with their number appended. */
@@ -99,6 +107,7 @@ public with sharing class ForgeHttp {
 
         private Response send(String method, String path, Object body)
         {
+            if (check != null) { check.beforeSending(method, waitSeconds); }
             Response response;
             try
             {
@@ -141,6 +150,13 @@ public with sharing class ForgeHttp {
             }
             return request;
         }
+    }
+
+    /** Decides whether a request may be sent, just before it is. */
+    public interface RequestCheck
+    {
+        /** Called with the method and the timeout in seconds of the request about to be sent; throws to stop it. */
+        void beforeSending(String method, Integer timeoutSeconds);
     }
 
     /** What the other system answered: its status, body and headers. */

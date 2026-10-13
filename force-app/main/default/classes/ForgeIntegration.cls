@@ -12,16 +12,20 @@ public abstract with sharing class ForgeIntegration {
 
     private static final Integer CALLOUT_SECONDS_PER_TRANSACTION = 120;
     private static final Integer CHAINED_JOBS_IN_TRIAL_AND_DEVELOPER_ORGS = 5;
+    private static final Integer NO_CHAIN_LIMIT = 2147483647;
     private static final List<Integer> RETRY_DELAY_MINUTES = new List<Integer>{ 1, 5 };
+    private static final Integer MOST_ATTEMPTS = RETRY_DELAY_MINUTES.size() + 1;
+    private static final Set<String> REPEATABLE_METHODS = new Set<String>{ 'GET', 'PUT', 'DELETE' };
     private static final Set<String> integrationsSavingResults = new Set<String>();
 
     @TestVisible
     private static Job followOnHeldForTest;
+    @TestVisible
+    private static Integer calloutsMadeBeforeJobForTest = 0;
+    @TestVisible
+    private static Integer secondsWaitedBeforeJobForTest = 0;
 
-    private transient String currentCallKey;
-    private transient Integer connectionsOpened;
-    private transient List<ForgeHttp.Connection> callConnections;
-    private transient Integer longestWaitSeconds;
+    private transient CallInProgress currentCall;
 
     /** Sends these records to the other system in a background job after the current transaction; never calls out in the caller's transaction. */
     public static void start(ForgeIntegration integration, List<SObject> records)
@@ -48,7 +52,7 @@ public abstract with sharing class ForgeIntegration {
         return 1;
     }
 
-    /** Whether the other system can safely receive the same POST or PATCH twice, so those calls may be retried. False unless overridden. */
+    /** Whether the other system can safely receive the same POST or PATCH twice, so a call that sent one may be retried whole. False unless overridden. */
     protected virtual Boolean repeatsAreSafe()
     {
         return false;
@@ -66,12 +70,7 @@ public abstract with sharing class ForgeIntegration {
     /** Opens a connection to the system behind the Named Credential with this name, keyed so a retried call repeats the same key. */
     protected ForgeHttp.Connection connection(String namedCredential)
     {
-        connectionsOpened++;
-        ForgeHttp.Connection opened = ForgeHttp.connection(namedCredential)
-            .idempotencyKey(connectionsOpened == 1 ? currentCallKey : currentCallKey + '-c' + connectionsOpened);
-        longestWaitSeconds = Math.max(longestWaitSeconds, opened.waitsUpToSeconds());
-        callConnections.add(opened);
-        return opened;
+        return currentCall.open(namedCredential);
     }
 
     /** Raised when an integration starts in a transaction that may queue no more jobs, such as a second start inside a Queueable. */
@@ -116,24 +115,20 @@ public abstract with sharing class ForgeIntegration {
     {
         JobOutcome outcome = new JobOutcome(name());
         Map<Id, SObject> recordsById = readRecords(job.recordIds());
-        Long millisWaited = 0;
-        longestWaitSeconds = 0;
+        CalloutRoom room = new CalloutRoom();
 
         for (Integer i = 0; i < job.calls.size(); i++)
         {
-            Call call = job.calls[i];
-            if (!hasRoomForAnotherCall(millisWaited))
+            sendCall(job.calls[i], recordsById, room, outcome);
+            if (room.ranOut)
             {
-                outcome.unsent.addAll(remainingFrom(job.calls, i));
+                outcome.unsent.addAll(remainingFrom(job.calls, i + 1));
                 break;
             }
-            Long callStarted = System.currentTimeMillis();
-            sendCall(call, recordsById, outcome);
-            millisWaited += System.currentTimeMillis() - callStarted;
         }
 
         List<SObject> saved = saveChanges(outcome);
-        if (!saved.isEmpty()) { afterCalls(saved); }
+        if (!saved.isEmpty()) { runAfterCalls(saved, job, outcome); }
         queueFollowOn(job, outcome);
         if (!outcome.failures.isEmpty()) { Database.insert(outcome.failures, AccessLevel.SYSTEM_MODE); }
     }
@@ -159,51 +154,28 @@ public abstract with sharing class ForgeIntegration {
         return !compoundOrBinary && (accessLevel() == AccessLevel.SYSTEM_MODE || field.isAccessible());
     }
 
-    private Boolean hasRoomForAnotherCall(Long millisWaited)
+    private void sendCall(Call call, Map<Id, SObject> recordsById, CalloutRoom room, JobOutcome outcome)
     {
-        Integer secondsLeft = CALLOUT_SECONDS_PER_TRANSACTION - (Integer) (millisWaited / 1000);
-        Integer secondsNeeded = longestWaitSeconds > 0 ? longestWaitSeconds : 30;
-        return Limits.getCallouts() < Limits.getLimitCallouts() && secondsLeft >= secondsNeeded;
-    }
-
-    private void sendCall(Call call, Map<Id, SObject> recordsById, JobOutcome outcome)
-    {
-        List<SObject> records = new List<SObject>();
-        List<Id> missing = new List<Id>();
-        for (Id recordId : call.recordIds)
-        {
-            if (recordsById.containsKey(recordId)) { records.add(recordsById.get(recordId)); }
-            else { missing.add(recordId); }
-        }
-        if (!missing.isEmpty())
-        {
-            outcome.addFailure(missing, null, null, 'The record was deleted, or the user who started the integration can no longer see it.');
-        }
+        List<SObject> records = recordsStillThere(call, recordsById, outcome);
         if (records.isEmpty()) { return; }
 
         List<Map<String, Object>> before = new List<Map<String, Object>>();
         for (SObject record : records) { before.add(new Map<String, Object>(record.getPopulatedFieldsAsMap())); }
 
-        currentCallKey = call.key;
-        connectionsOpened = 0;
-        callConnections = new List<ForgeHttp.Connection>();
+        currentCall = new CallInProgress(call.key, room);
         try
         {
             run(records);
-            outcome.completed.add(new CompletedCall(records, before));
+            if (room.ranOut) { passOnOrRecordFailure(call, outcome); }
+            else { outcome.completed.add(new CompletedCall(records, before)); }
+        }
+        catch (NoRoomLeftException stopped)
+        {
+            passOnOrRecordFailure(call, outcome);
         }
         catch (ForgeHttp.CalloutFailureException failure)
         {
-            Boolean retryAllowed = failure.isWorthRetrying() && (repeatsAreSafe() || isSafeToRepeat(failure.method));
-            if (retryAllowed && call.attempt < RETRY_DELAY_MINUTES.size() + 1)
-            {
-                outcome.retries.add(call.nextAttempt());
-            }
-            else
-            {
-                String reason = failure.getMessage() + ' after ' + call.attempt + ' attempt(s).';
-                outcome.addFailure(call.recordIds, failure.status, failure.replyBody, reason);
-            }
+            retryOrRecordFailure(call, failure, outcome);
         }
         catch (CalloutException notSent)
         {
@@ -213,24 +185,70 @@ public abstract with sharing class ForgeIntegration {
         {
             // A request no test described must fail that test, not become a failure record.
             if (unexpected.getTypeName() == 'ForgeHttpMock.UnmatchedRequestException') { throw unexpected; }
-            ForgeHttp.Response reply = lastReplyOfThisCall();
+            ForgeHttp.Response reply = currentCall.lastReply();
             String reason = 'The integration failed while handling the reply: ' + unexpected.getTypeName() + ': ' + unexpected.getMessage();
             outcome.addFailure(call.recordIds, reply?.status, reply?.body, reason);
         }
     }
 
-    private ForgeHttp.Response lastReplyOfThisCall()
+    private static List<SObject> recordsStillThere(Call call, Map<Id, SObject> recordsById, JobOutcome outcome)
     {
-        for (Integer i = callConnections.size() - 1; i >= 0; i--)
+        List<SObject> records = new List<SObject>();
+        for (Id recordId : call.recordIds)
         {
-            if (callConnections[i].lastReply() != null) { return callConnections[i].lastReply(); }
+            if (recordsById.containsKey(recordId)) { records.add(recordsById.get(recordId)); }
+            else
+            {
+                outcome.addFailure(new List<Id>{ recordId }, null, null,
+                    'The record was deleted, or the user who started the integration can no longer see it.');
+            }
         }
-        return null;
+        return records;
     }
 
-    private static Boolean isSafeToRepeat(String method)
+    private void retryOrRecordFailure(Call call, ForgeHttp.CalloutFailureException failure, JobOutcome outcome)
     {
-        return method == 'GET' || method == 'PUT' || method == 'DELETE';
+        Boolean mayBeRepeated = currentCall.mayBeRepeated(repeatsAreSafe());
+        if (failure.isWorthRetrying() && mayBeRepeated && call.attempt < MOST_ATTEMPTS)
+        {
+            outcome.retries.add(call.nextAttempt());
+            return;
+        }
+        String reason = failure.getMessage() + ' after ' + call.attempt + ' attempt(s)';
+        if (failure.isWorthRetrying() && !mayBeRepeated)
+        {
+            reason += '; not retried, because the call had sent ' + currentCall.unrepeatableRequest()
+                + ', which the integration does not say may be repeated';
+        }
+        outcome.addFailure(call.recordIds, failure.status, failure.replyBody, reason + '.');
+    }
+
+    private void passOnOrRecordFailure(Call call, JobOutcome outcome)
+    {
+        if (currentCall.mayBeRepeated(repeatsAreSafe()))
+        {
+            outcome.unsent.add(call);
+            return;
+        }
+        ForgeHttp.Response reply = currentCall.lastReply();
+        outcome.addFailure(call.recordIds, reply?.status, reply?.body, 'Not finished: the job ran out of callout room'
+            + ' after the call had sent ' + currentCall.unrepeatableRequest() + ', which the integration does not say'
+            + ' may be repeated, so the call was not passed to a follow-on job.');
+    }
+
+    private void runAfterCalls(List<SObject> saved, Job job, JobOutcome outcome)
+    {
+        Savepoint beforeAfterCalls = Database.setSavepoint();
+        try
+        {
+            afterCalls(saved);
+        }
+        catch (Exception failure)
+        {
+            Database.rollback(beforeAfterCalls);
+            outcome.addFailure(job.recordIds(), null, null, 'afterCalls failed, so what it did was undone; the records'
+                + ' the calls changed are saved: ' + failure.getTypeName() + ': ' + failure.getMessage());
+        }
     }
 
     private static List<Call> remainingFrom(List<Call> calls, Integer first)
@@ -248,7 +266,7 @@ public abstract with sharing class ForgeIntegration {
         {
             for (Integer i = 0; i < completed.records.size(); i++)
             {
-                SObject change = completed.changeTo(i);
+                SObject change = completed.changedFieldsOf(i);
                 if (change != null)
                 {
                     changes.add(change);
@@ -282,12 +300,15 @@ public abstract with sharing class ForgeIntegration {
         calls.addAll(outcome.retries);
         if (calls.isEmpty()) { return; }
 
-        if (job.chainDepth + 1 >= chainedJobLimit())
+        String refusal;
+        if (job.chainDepth + 1 >= chainedJobLimit()) { refusal = 'the org allows no more chained jobs'; }
+        else if (Limits.getQueueableJobs() >= Limits.getLimitQueueableJobs()) { refusal = 'the job had already queued the one job it may'; }
+        if (refusal != null)
         {
             for (Call call : calls)
             {
                 outcome.addFailure(call.recordIds, null, null,
-                    'Not sent: the org allows no more chained jobs, so the call could not be passed to a follow-on job.');
+                    'Not sent: ' + refusal + ', so the call could not be passed to a follow-on job.');
             }
             return;
         }
@@ -306,7 +327,7 @@ public abstract with sharing class ForgeIntegration {
     {
         Organization org = [SELECT OrganizationType, TrialExpirationDate FROM Organization LIMIT 1];
         Boolean limitedOrg = org.TrialExpirationDate != null || org.OrganizationType == 'Developer Edition';
-        return limitedOrg ? CHAINED_JOBS_IN_TRIAL_AND_DEVELOPER_ORGS : 2147483647;
+        return limitedOrg ? CHAINED_JOBS_IN_TRIAL_AND_DEVELOPER_ORGS : NO_CHAIN_LIMIT;
     }
 
     /** Runs the follow-on job a test's job passed on, such as a retry, as Salesforce would have queued it. */
@@ -368,6 +389,78 @@ public abstract with sharing class ForgeIntegration {
         }
     }
 
+    private class CalloutRoom
+    {
+        private final Long started = System.currentTimeMillis();
+        private Boolean ranOut = false;
+
+        private void makeRoomFor(Integer timeoutSeconds)
+        {
+            Integer calloutsMade = Limits.getCallouts() + calloutsMadeBeforeJobForTest;
+            Long secondsWaited = secondsWaitedBeforeJobForTest + (System.currentTimeMillis() - started) / 1000;
+            Boolean fits = calloutsMade < Limits.getLimitCallouts() && CALLOUT_SECONDS_PER_TRANSACTION - secondsWaited >= timeoutSeconds;
+            // Once a request has not fitted, the job sends nothing more, even a request with a shorter timeout.
+            ranOut = ranOut || !fits;
+            if (ranOut) { throw new NoRoomLeftException(); }
+        }
+    }
+
+    private class CallInProgress implements ForgeHttp.RequestCheck
+    {
+        private final String key;
+        private final CalloutRoom room;
+        private final List<ForgeHttp.Connection> connections = new List<ForgeHttp.Connection>();
+        private final List<String> requestsSent = new List<String>();
+
+        private CallInProgress(String key, CalloutRoom room)
+        {
+            this.key = key;
+            this.room = room;
+        }
+
+        private ForgeHttp.Connection open(String namedCredential)
+        {
+            // Every request in a call gets its own key, the same on each retry: a later connection adds -c and its
+            // number here, and a later request on one connection adds - and its number in ForgeHttp.
+            String connectionKey = connections.isEmpty() ? key : key + '-c' + (connections.size() + 1);
+            ForgeHttp.Connection opened = ForgeHttp.connection(namedCredential).idempotencyKey(connectionKey)
+                .checkingEachRequestWith(this);
+            connections.add(opened);
+            return opened;
+        }
+
+        public void beforeSending(String method, Integer timeoutSeconds)
+        {
+            room.makeRoomFor(timeoutSeconds);
+            requestsSent.add(method);
+        }
+
+        private Boolean mayBeRepeated(Boolean repeatsAreSafe)
+        {
+            return repeatsAreSafe || unrepeatableRequest() == null;
+        }
+
+        private String unrepeatableRequest()
+        {
+            for (String method : requestsSent)
+            {
+                if (!REPEATABLE_METHODS.contains(method)) { return 'a ' + method; }
+            }
+            return null;
+        }
+
+        private ForgeHttp.Response lastReply()
+        {
+            for (Integer i = connections.size() - 1; i >= 0; i--)
+            {
+                if (connections[i].lastReply() != null) { return connections[i].lastReply(); }
+            }
+            return null;
+        }
+    }
+
+    private class NoRoomLeftException extends Exception {}
+
     private class CompletedCall
     {
         private final List<SObject> records;
@@ -379,7 +472,7 @@ public abstract with sharing class ForgeIntegration {
             this.before = before;
         }
 
-        private SObject changeTo(Integer index)
+        private SObject changedFieldsOf(Integer index)
         {
             SObject record = records[index];
             Map<String, Object> earlier = before[index];
@@ -415,7 +508,7 @@ public abstract with sharing class ForgeIntegration {
         {
             failures.add(new Integration_Failure__c(
                 Integration__c = integrationName,
-                Record_Ids__c = String.join(recordIds, ','),
+                Record_Ids__c = String.join(recordIds, ',').abbreviate(131072),
                 Status__c = status,
                 Reply_Body__c = replyBody == null ? null : replyBody.abbreviate(131072),
                 Reason__c = reason.abbreviate(32768)

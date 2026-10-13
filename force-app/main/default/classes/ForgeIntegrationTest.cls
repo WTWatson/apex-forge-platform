@@ -13,7 +13,7 @@ private class ForgeIntegrationTest
     }
 
     /** Posts customers to the ERP and writes the number it answers into the Account Number. */
-    private class RecordErpNumbers extends ForgeIntegration
+    private virtual class RecordErpNumbers extends ForgeIntegration
     {
         private final Integer perCall;
         private final Boolean safeToRepeat;
@@ -45,11 +45,84 @@ private class ForgeIntegrationTest
 
         protected override Boolean repeatsAreSafe() { return safeToRepeat; }
 
-        protected override void afterCalls(List<SObject> records)
+        protected virtual override void afterCalls(List<SObject> records)
         {
             List<Task> welcomes = new List<Task>();
             for (SObject record : records) { welcomes.add(new Task(WhatId = record.Id, Subject = 'Welcome')); }
             insert welcomes;
+        }
+    }
+
+    /** Welcomes the new customers, then fails, as a rejected Task insert would. */
+    private class RecordErpNumbersButFailToWelcome extends RecordErpNumbers
+    {
+        RecordErpNumbersButFailToWelcome() { super(1, true); }
+
+        protected override void afterCalls(List<SObject> records)
+        {
+            super.afterCalls(records);
+            throw new DmlException('Welcome tasks are closed today');
+        }
+    }
+
+    /** Uses every job the transaction may still queue, as other trigger logic could. */
+    private class RecordErpNumbersAndQueueEveryJob extends RecordErpNumbers
+    {
+        RecordErpNumbersAndQueueEveryJob() { super(1, true); }
+
+        protected override void afterCalls(List<SObject> records)
+        {
+            while (Limits.getQueueableJobs() < Limits.getLimitQueueableJobs()) { System.enqueueJob(new DoNothing()); }
+        }
+    }
+
+    /** Creates the customer in the ERP, then reads back its credit limit; a POST and then a GET in one call. */
+    private class CreateCustomersWithCreditLimits extends ForgeIntegration
+    {
+        private final Boolean safeToRepeat;
+
+        CreateCustomersWithCreditLimits(Boolean safeToRepeat)
+        {
+            this.safeToRepeat = safeToRepeat;
+        }
+
+        protected override void run(List<SObject> records)
+        {
+            Account account = (Account) records[0];
+            ForgeHttp.Connection erp = connection(ERP);
+            account.AccountNumber = erp.post('/customers', account.Name).body;
+            account.AnnualRevenue = Decimal.valueOf(erp.get('/credit-limits').body);
+        }
+
+        protected override Boolean repeatsAreSafe() { return safeToRepeat; }
+    }
+
+    /** Reads each customer's rating and credit limit from the ERP; two GETs in one call. */
+    private class LookUpRatingsAndLimits extends ForgeIntegration
+    {
+        protected override void run(List<SObject> records)
+        {
+            Account account = (Account) records[0];
+            ForgeHttp.Connection erp = connection(ERP);
+            account.Rating = erp.get('/ratings').body;
+            account.AnnualRevenue = Decimal.valueOf(erp.get('/credit-limits').body);
+        }
+    }
+
+    /** Reads each customer's rating from an ERP that may take this many seconds to answer. */
+    private class LookUpSlowRatings extends ForgeIntegration
+    {
+        private final Integer seconds;
+
+        LookUpSlowRatings(Integer seconds)
+        {
+            this.seconds = seconds;
+        }
+
+        protected override void run(List<SObject> records)
+        {
+            Account account = (Account) records[0];
+            account.Rating = connection(ERP).waitsUpToSeconds(seconds).get('/ratings').body;
         }
     }
 
@@ -230,7 +303,168 @@ private class ForgeIntegrationTest
 
         Assert.areEqual(1, customers.requests().size());
         Assert.isNull(ForgeIntegration.followOnHeldForTest, 'the ERP may have acted on the lost reply');
-        Assert.areEqual('POST /customers failed with status 503 after 1 attempt(s).', onlyFailure().Reason__c);
+        Assert.areEqual('POST /customers failed with status 503 after 1 attempt(s); not retried, because the call had sent'
+            + ' a POST, which the integration does not say may be repeated.', onlyFailure().Reason__c);
+    }
+
+    @IsTest
+    static void aCallThatSentAPostIsNotRetriedWhenALaterGetIsUnavailable()
+    {
+        ForgeHttpMock.Route customers = ForgeHttpMock.connection(ERP).post('/customers').reply(201, 'C-1');
+        ForgeHttpMock.connection(ERP).get('/credit-limits').reply(503, 'busy');
+
+        Test.startTest();
+        ForgeIntegration.start(new CreateCustomersWithCreditLimits(false), newAccounts(1));
+        Test.stopTest();
+
+        Assert.isNull(ForgeIntegration.followOnHeldForTest, 'repeating the call would post the customer again');
+        Assert.areEqual(1, customers.requests().size());
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(503, failure.Status__c);
+        Assert.isTrue(failure.Reason__c.contains('not retried, because the call had sent a POST'), failure.Reason__c);
+    }
+
+    @IsTest
+    static void aCallThatSentAPostIsRetriedWholeWhenRepeatsAreSafe()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.Route customers = ForgeHttpMock.connection(ERP).post('/customers').reply(201, 'C-1');
+        ForgeHttpMock.connection(ERP).get('/credit-limits').reply(503, 'busy').reply(200, '5000');
+
+        Test.startTest();
+        ForgeIntegration.start(new CreateCustomersWithCreditLimits(true), new List<Account>{ acme });
+        Test.stopTest();
+        ForgeIntegration.runFollowOnHeldForTest();
+
+        Assert.areEqual(2, customers.requests().size(), 'the retry repeats the whole call, the POST included');
+        Assert.areEqual(customers.requests()[0].getHeader('Idempotency-Key'), customers.requests()[1].getHeader('Idempotency-Key'));
+        Account saved = [SELECT AccountNumber, AnnualRevenue FROM Account WHERE Id = :acme.Id];
+        Assert.areEqual('C-1', saved.AccountNumber);
+        Assert.areEqual(5000, saved.AnnualRevenue);
+        Assert.areEqual(0, [SELECT COUNT() FROM Integration_Failure__c]);
+    }
+
+    @IsTest
+    static void aCallWhoseSecondRequestWouldPassOneHundredCalloutsGoesToTheFollowOnJob()
+    {
+        List<Account> accounts = newAccounts(50);
+        ForgeHttpMock.Route ratings = ForgeHttpMock.connection(ERP).get('/ratings').reply(200, 'Hot');
+        ForgeHttpMock.Route limits = ForgeHttpMock.connection(ERP).get('/credit-limits').reply(200, '5000');
+        ForgeIntegration.calloutsMadeBeforeJobForTest = 1;
+
+        Test.startTest();
+        ForgeIntegration.start(new LookUpRatingsAndLimits(), accounts);
+        Test.stopTest();
+
+        Assert.areEqual(50, ratings.requests().size());
+        Assert.areEqual(49, limits.requests().size(), 'the last call stops before the 101st callout');
+        Assert.areEqual(49, [SELECT COUNT() FROM Account WHERE AnnualRevenue = 5000]);
+        Assert.areEqual(0, [SELECT COUNT() FROM Integration_Failure__c]);
+
+        ForgeIntegration.calloutsMadeBeforeJobForTest = 0;
+        ForgeIntegration.runFollowOnHeldForTest();
+
+        Assert.areEqual(51, ratings.requests().size(), 'two GETs may be repeated, so the stopped call is sent again whole');
+        Assert.areEqual(50, [SELECT COUNT() FROM Account WHERE Rating = 'Hot' AND AnnualRevenue = 5000]);
+    }
+
+    @IsTest
+    static void aCallStoppedForRoomAfterAPostBecomesAFailureRecord()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.Route customers = ForgeHttpMock.connection(ERP).post('/customers').reply(201, 'C-1');
+        ForgeHttpMock.Route limits = ForgeHttpMock.connection(ERP).get('/credit-limits').reply(200, '5000');
+        ForgeIntegration.calloutsMadeBeforeJobForTest = 99;
+
+        Test.startTest();
+        ForgeIntegration.start(new CreateCustomersWithCreditLimits(false), new List<Account>{ acme });
+        Test.stopTest();
+
+        Assert.areEqual(1, customers.requests().size());
+        Assert.areEqual(0, limits.requests().size());
+        Assert.isNull(ForgeIntegration.followOnHeldForTest, 'the POST is not sent a second time');
+        Assert.isNull([SELECT AccountNumber FROM Account WHERE Id = :acme.Id].AccountNumber);
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(201, failure.Status__c);
+        Assert.areEqual('C-1', failure.Reply_Body__c, 'the reply of the POST is kept');
+        Assert.isTrue(failure.Reason__c.startsWith('Not finished: the job ran out of callout room after the call had sent a POST'), failure.Reason__c);
+    }
+
+    @IsTest
+    static void aRequestWaitingLongerThanTheSecondsLeftIsNotSent()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.Route ratings = ForgeHttpMock.connection(ERP).get('/ratings').reply(200, 'Hot');
+        ForgeIntegration.secondsWaitedBeforeJobForTest = 80;
+
+        Test.startTest();
+        ForgeIntegration.start(new LookUpSlowRatings(60), new List<Account>{ acme });
+        Test.stopTest();
+
+        Assert.areEqual(0, ratings.requests().size(), '40 seconds are left and the request may wait 60');
+        Assert.isNotNull(ForgeIntegration.followOnHeldForTest);
+
+        ForgeIntegration.secondsWaitedBeforeJobForTest = 0;
+        ForgeIntegration.runFollowOnHeldForTest();
+
+        Assert.areEqual('Hot', [SELECT Rating FROM Account WHERE Id = :acme.Id].Rating);
+    }
+
+    @IsTest
+    static void aRequestWaitingNoLongerThanTheSecondsLeftIsSent()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.connection(ERP).get('/ratings').reply(200, 'Hot');
+        ForgeIntegration.secondsWaitedBeforeJobForTest = 80;
+
+        Test.startTest();
+        ForgeIntegration.start(new LookUpSlowRatings(30), new List<Account>{ acme });
+        Test.stopTest();
+
+        Assert.areEqual('Hot', [SELECT Rating FROM Account WHERE Id = :acme.Id].Rating);
+        Assert.isNull(ForgeIntegration.followOnHeldForTest);
+    }
+
+    @IsTest
+    static void anAfterCallsThatThrowsIsUndoneAndTheSavedRecordsAndTheRetryStay()
+    {
+        List<Account> accounts = newAccounts(2);
+        ForgeHttpMock.connection(ERP).post('/customers').reply(201, numbers(1)).reply(503, 'busy');
+
+        Test.startTest();
+        ForgeIntegration.start(new RecordErpNumbersButFailToWelcome(), accounts);
+        Test.stopTest();
+
+        Assert.areEqual('ERP C-1', [SELECT AccountNumber FROM Account WHERE Id = :accounts[0].Id].AccountNumber);
+        Assert.areEqual(0, [SELECT COUNT() FROM Task], 'the welcome afterCalls inserted is undone');
+        Assert.isNotNull(ForgeIntegration.followOnHeldForTest, 'the second call is still retried');
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(accounts[0].Id + ',' + accounts[1].Id, failure.Record_Ids__c, 'the job\'s records');
+        Assert.isTrue(failure.Reason__c.startsWith('afterCalls failed'), failure.Reason__c);
+        Assert.isTrue(failure.Reason__c.endsWith('System.DmlException: Welcome tasks are closed today'), failure.Reason__c);
+    }
+
+    @IsTest
+    static void aRetryTheJobCanNoLongerQueueBecomesAFailureRecord()
+    {
+        List<Account> accounts = newAccounts(2);
+        ForgeHttpMock.connection(ERP).post('/customers').reply(201, numbers(1)).reply(503, 'busy');
+        // A test cannot chain a job from a queued job, so the first job only passes the calls on, and the
+        // follow-on runs here, where afterCalls can use up the jobs the transaction may queue.
+        ForgeIntegration.calloutsMadeBeforeJobForTest = 100;
+        Test.startTest();
+        ForgeIntegration.start(new RecordErpNumbersAndQueueEveryJob(), accounts);
+        Test.stopTest();
+        ForgeIntegration.calloutsMadeBeforeJobForTest = 0;
+
+        ForgeIntegration.runFollowOnHeldForTest();
+
+        Assert.isNull(ForgeIntegration.followOnHeldForTest);
+        Assert.areEqual('ERP C-1', [SELECT AccountNumber FROM Account WHERE Id = :accounts[0].Id].AccountNumber);
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(accounts[1].Id, failure.Record_Ids__c);
+        Assert.areEqual('Not sent: the job had already queued the one job it may, so the call could not be passed to a'
+            + ' follow-on job.', failure.Reason__c);
     }
 
     @IsTest
@@ -351,6 +585,22 @@ private class ForgeIntegrationTest
         Assert.areEqual(gone.Id, failure.Record_Ids__c);
         Assert.isNull(failure.Status__c);
         Assert.isTrue(failure.Reason__c.contains('deleted'), failure.Reason__c);
+    }
+
+    @IsTest
+    static void eachRecordDeletedBeforeTheJobRunsHasItsOwnFailureRecord()
+    {
+        List<Account> gone = newAccounts(2);
+        ForgeHttpMock.connection(ERP).post('/customers').reply(201, numbers(2));
+
+        Test.startTest();
+        ForgeIntegration.start(new RecordErpNumbers(2, false), gone);
+        delete gone;
+        Test.stopTest();
+
+        Set<String> failedIds = new Set<String>();
+        for (Integration_Failure__c failure : [SELECT Record_Ids__c FROM Integration_Failure__c]) { failedIds.add(failure.Record_Ids__c); }
+        Assert.areEqual(new Set<String>{ gone[0].Id, gone[1].Id }, failedIds);
     }
 
     @IsTest
