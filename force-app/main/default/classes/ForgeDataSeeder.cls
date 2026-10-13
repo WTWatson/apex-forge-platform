@@ -197,13 +197,13 @@ public with sharing class ForgeDataSeeder {
         return new SequenceProvider(prefix);
     }
 
-    /** Gives each built record a different British first name, in turn. */
+    /** Gives built records British first names in turn, repeating from the start when the list runs out. */
     public static ForgeDataBuilder.ValueProvider firstNames()
     {
         return new CycleProvider(FIRST_NAMES);
     }
 
-    /** Gives each built record a different British surname, in turn. */
+    /** Gives built records British surnames in turn, repeating from the start when the list runs out. */
     public static ForgeDataBuilder.ValueProvider lastNames()
     {
         return new CycleProvider(LAST_NAMES);

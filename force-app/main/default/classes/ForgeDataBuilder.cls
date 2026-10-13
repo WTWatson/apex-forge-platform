@@ -23,7 +23,7 @@ public with sharing class ForgeDataBuilder {
     /** Raised when a builder is set up wrongly, such as with a field of another object or an unsaved parent. */
     public class ConfigException extends Exception {}
 
-    /** Supplies a different value for each record when several are built at once, through get(index), counting from zero. */
+    /** Supplies the value for the record at the given zero-based index, through get(index), when several are built at once. */
     public interface ValueProvider { Object get(Integer index); }
 
     /** Starts building test records of the given object type. */
@@ -49,7 +49,7 @@ public with sharing class ForgeDataBuilder {
             this.sObjType = t;
         }
 
-        /** Sets a field on every record, to one value or to a ValueProvider that gives each record its own. */
+        /** Sets a field on every record, to one value or to a ValueProvider that supplies each record's value by its index. */
         public Builder with(SObjectField f, Object value)
         {
             if (f == null) { throw new ConfigException('field required'); }
