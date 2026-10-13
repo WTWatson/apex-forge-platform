@@ -110,8 +110,8 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   when it is queued, so starts are not combined.
 - A trigger receives records in chunks of 200, so inserting 2,000 Accounts starts
   10 jobs. Each makes 4 calls of 50 and saves its own 200 Accounts. When one
-  `start` is given more records than 100 calls can carry, its job sends the first
-  100 calls and passes the rest to a follow-on job.
+  `start` is given more records than 100 callouts can carry, its job sends what
+  fits and passes the rest to a follow-on job.
 - A transaction that is itself asynchronous (a Queueable, a batch `execute`, a
   future method) may queue only one job. There the first `start` queues; a second
   `start` in the same transaction throws `ForgeIntegration.StartRefusedException`,
@@ -130,8 +130,8 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   request the platform checks the job still has room: under 100 callouts, and at
   least that request's timeout, as set when it is sent, left of the 120 seconds a
   transaction may spend waiting on callouts. If not, the call stops there, sends
-  nothing more, and is passed to a follow-on job under the retry rule below, as
-  are the calls after it.
+  nothing more, and is passed to a follow-on job under the retry rule below. The
+  calls after it have sent nothing, so they go to the follow-on job as they are.
 - **Retry**: a timeout or a 502, 503 or 504 reply is retried, at most 3 attempts,
   in a follow-on job queued with a delay of 1, then 5 minutes. A call is always
   repeated whole, from the start of `run`, so it is retried only when every
@@ -174,18 +174,26 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   still queues its follow-on.
 - **Follow-on jobs**: a job queues at most one follow-on, after its save. It
   carries the calls not yet sent and the calls due for retry. If the org's limit on
-  chained jobs (5 in developer and scratch orgs) would be passed, or the
-  transaction has already queued its one job (from `afterCalls` or other trigger
-  logic), the calls not sent are recorded as failures instead of being dropped.
-  Only an error Apex cannot catch, such as a governor limit, still ends the job
-  and undoes its save.
+  chained jobs (5 in developer and scratch orgs) would be passed, or the job's
+  transaction has already queued the one job it may (see "One job per start"; for
+  example from `afterCalls` or other trigger logic), the calls not sent are
+  recorded as failures instead of being dropped.
+- **What cannot be caught**: an error Apex cannot catch, such as a governor limit,
+  still ends the whole job and undoes its save.
 
 ### Failures
 
-After the last attempt, or when a call cannot be sent, the platform writes one
-`Integration_Failure__c` per call: the integration, the record Ids, the status, the
-reply body and the reason. Someone can then put it right or start the integration
-again for those records.
+Each failure is one `Integration_Failure__c` holding the integration and the
+reason. There are three kinds:
+
+- **A call** that failed after its last attempt, could not be repeated, could not
+  be sent, or whose `run` threw: its record Ids, the status and the reply body.
+- **A record**: one that was deleted or that the user can no longer see holds its
+  Id; one that failed to save holds its Id and the changes that were not saved.
+- **An `afterCalls` error**: the job's record Ids and the error; it belongs to no
+  one call.
+
+Someone can then put it right or start the integration again for those records.
 
 ### Who it runs as, and what they may see
 
@@ -216,9 +224,8 @@ plain-Apex version (trigger + Queueable + request building + chunking + mock).
   The integration is what removes the boilerplate that hurts most.
 - **Authentication**: Named Credentials only. No tokens or headers managed by the
   platform.
-- **Failures after the last retry**: each is kept as a small `Integration_Failure__c`
-  record (integration, records, status, reply body). A later logging module can
-  absorb it.
+- **Failures**: each is kept as a small `Integration_Failure__c` record, of the
+  three kinds under "Failures". A later logging module can absorb it.
 - **Direction**: outbound callouts only. Inbound REST endpoints are out of scope.
 - **Repeated calls**: a POST or PATCH is retried only when the integration says
   repeats are safe, so a lost reply cannot create a second customer by default.
