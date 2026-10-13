@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Reply_Body__c</fullName>
+    <label>Reply Body</label>
+    <description>What the other system answered; for a record that failed to save, the values the reply gave that record.</description>
+    <type>LongTextArea</type>
+    <length>131072</length>
+    <visibleLines>10</visibleLines>
+</CustomField>
