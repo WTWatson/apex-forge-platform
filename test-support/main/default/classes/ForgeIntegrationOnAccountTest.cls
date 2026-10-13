@@ -136,6 +136,24 @@ private class ForgeIntegrationOnAccountTest
     }
 
     @IsTest
+    static void aChangeAfterTheIntegrationHasSavedStartsItAgain()
+    {
+        ForgeTestAccountHandlers.toRun = new List<ForgeTriggerHandler>{ new SendEveryChangeToErp() };
+        ForgeHttpMock.connection('ERP').post('/customers').reply(201, numbers(1));
+
+        System.runAs(salesUser('Forge_Test_Erp_Customer_Number'))
+        {
+            Test.startTest();
+            insert new Account(Name = 'Acme Ltd');
+            Test.stopTest();
+
+            Integer jobsBefore = Limits.getQueueableJobs();
+            update new Account(Id = [SELECT Id FROM Account].Id, Name = 'Acme Limited');
+            Assert.areEqual(jobsBefore + 1, Limits.getQueueableJobs(), 'the integration is switched back on once its save is done');
+        }
+    }
+
+    @IsTest
     static void aUserWhoCannotEditTheNumberGetsAFailureRecordHoldingIt()
     {
         ForgeTestAccountHandlers.toRun = new List<ForgeTriggerHandler>{ new NewAccountsBecomeErpCustomers() };
