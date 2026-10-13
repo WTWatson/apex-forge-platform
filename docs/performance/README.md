@@ -72,28 +72,24 @@ are reported too.
 
 ## Trigger handler framework
 
-_Run: 2026-10-13, e2a5cf0, API 66.0_
+_Run: 2026-10-13, 1575720, API 66.0_
 
-| Records | CPU ms | Heap | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ---- | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 22     | 455  | 0    | 0          | 1   | 1        | 94      | First published run |
-| 200     | 411    | 5231 | 0    | 0          | 1   | 200      | 606     | First published run |
-| 2000    |        |      |      |            |     |          |         | Not published yet   |
-
-The version measured here has a defect that skips every record after the first
-200, so a 2,000-record number would only be the cost of 200. A fix is on its way,
-and this row is filled in once it is merged.
+| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
+| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ------------------- |
+| 1       | 21     | 487   | 0    | 0          | 1   | 1        | 99      | within thresholds   |
+| 200     | 427    | 5263  | 0    | 0          | 1   | 200      | 635     | within thresholds   |
+| 2000    | 4568   | 48463 | 0    | 0          | 1   | 2000     | 6699    | First published run |
 
 Consumer lines: 15 (with the platform) / 21 (plain Apex)
 
 ## Data builder and seeder
 
-_Run: 2026-10-13, e2a5cf0, API 66.0_
+_Run: 2026-10-13, 1575720, API 66.0_
 
-| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 68     | 3756   | 0    | 0          | 2   | 2        | 223     | First published run |
-| 200     | 434    | 28127  | 0    | 0          | 2   | 201      | 780     | First published run |
-| 2000    | 4773   | 250528 | 0    | 0          | 2   | 2001     | 9060    | First published run |
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ----------------- |
+| 1       | 61     | 3770   | 0    | 0          | 2   | 2        | 206     | within thresholds |
+| 200     | 520    | 28141  | 0    | 0          | 2   | 201      | 1110    | within thresholds |
+| 2000    | 5440   | 250554 | 0    | 0          | 2   | 2001     | 10410   | within thresholds |
 
 Consumer lines: 13 (with the platform) / 31 (plain Apex)
