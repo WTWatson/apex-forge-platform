@@ -12,8 +12,8 @@ module ships as one pull request with its tests, its consumer sample
   sample data without boilerplate.
 
 ## Next, in order
-_Will fills this in through the inbox. The lead takes the first entry as the next
-module and writes its design note in `docs/design/<module>.md` before any code._
+_The maintainer sets this order. Each module gets a short design note in
+`docs/design/<module>.md` before any code is written._
 
 1.
 2.

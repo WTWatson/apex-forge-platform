@@ -40,7 +40,7 @@ side by side.
 If a change makes CPU time, or any of the governor measures (heap, queries, query
 rows, DML statements, DML rows), more than 10% worse than the last published run,
 it is treated as a regression. It must be fixed or explained before it is merged.
-The limits are set in `perf/thresholds.json`. Wall time is shown but is not checked.
+The 10% thresholds are set in `perf/thresholds.json`. Wall time is shown but is not checked.
 Faster numbers are reported too.
 
 ## Trigger handler framework

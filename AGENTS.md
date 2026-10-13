@@ -1,4 +1,7 @@
-# Apex Forge Platform: agent guidance
+# Apex Forge Platform: contributor standards
+
+These are the standards every change to the platform follows, whether a person or an
+AI agent writes it.
 
 Business logic is what the developer writes. No boilerplate, no helper functions:
 the platform handles the rest. Every module is measured, and its numbers ship with
@@ -22,10 +25,10 @@ Salesforce DX project. Source lives in force-app/main/default.
 - No SeeAllData=true. Build test data in the test or a factory class.
 
 ## Verification
-- Apex tests run in the seat's own scratch org, from the Dev Hub `forge-devhub`:
-  `sf apex run test -o forge-<seat>-<n> --test-level RunLocalTests --code-coverage --wait 20`.
-  A change is not done until that run passes, and the run's numbers go in the handoff.
+- Run the Apex tests in your own scratch org:
+  `sf apex run test -o <your-org> --test-level RunLocalTests --code-coverage --wait 20`.
+  A change is not done until that run passes, and its results go in the pull request.
 - Run `npm run lint` and `npm run prettier:verify`; format only the files you changed.
 - One module or one fix per branch (`feat/`, `fix/`, `perf/` or `docs/`), pushed to
   that branch only, as one pull request into `main`. Never push to `main`, never
-  merge, never force-push: Will merges.
+  merge, never force-push: the maintainer, William Watson, merges.

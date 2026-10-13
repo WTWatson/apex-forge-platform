@@ -1,5 +1,5 @@
 {
-  "_comment": "Regression thresholds as a fraction of the previous published baseline. cpu_time covers cpu_time_ms; governor covers soql_queries, query_rows, dml_statements, dml_rows and heap_bytes. A measure worse than its threshold is a finding (see the perf seat's skill).",
+  "_comment": "Regression thresholds as a fraction of the previous published baseline. cpu_time covers cpu_time_ms; governor covers soql_queries, query_rows, dml_statements, dml_rows and heap_bytes. A measure worse than its threshold is a finding (see docs/performance/README.md).",
   "cpu_time": 0.10,
   "governor": 0.10
 }
