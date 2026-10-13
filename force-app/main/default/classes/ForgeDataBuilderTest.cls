@@ -266,4 +266,24 @@ private class ForgeDataBuilderTest {
         Assert.areEqual('Second', a.Name,
             'Later with() call should overwrite earlier value');
     }
+
+    @IsTest
+    static void bulkAutoFillNumbersTextAndSharesFixedDefaults()
+    {
+        Test.startTest();
+        List<SObject> opps = ForgeDataBuilder.of(Opportunity.SObjectType)
+            .count(200)
+            .buildList();
+        Test.stopTest();
+
+        Opportunity first = (Opportunity) opps[0];
+        Opportunity last = (Opportunity) opps[199];
+        Assert.areEqual(200, opps.size());
+        Assert.areEqual('Name 1', first.Name);
+        Assert.areEqual('Name 200', last.Name);
+        Assert.isNotNull(first.StageName);
+        Assert.areEqual(first.StageName, last.StageName,
+            'Every record should get the same first active stage');
+        Assert.areEqual(Date.today(), last.CloseDate);
+    }
 }
