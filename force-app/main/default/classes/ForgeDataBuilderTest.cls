@@ -393,6 +393,25 @@ private class ForgeDataBuilderTest {
     }
 
     @IsTest
+    static void repeatedBuildsOfOneObjectEachFillWhatIsMissing()
+    {
+        Test.startTest();
+        Contact filled = (Contact) ForgeDataBuilder.of(Contact.SObjectType).build();
+        Contact named = (Contact) ForgeDataBuilder.of(Contact.SObjectType)
+            .with(Contact.LastName, 'Smith')
+            .build();
+        List<SObject> several = ForgeDataBuilder.of(Contact.SObjectType)
+            .count(2)
+            .buildList();
+        Test.stopTest();
+
+        Assert.areEqual('Test', filled.LastName);
+        Assert.areEqual('Smith', named.LastName,
+            'An explicit value on a later build should win over the remembered required field');
+        Assert.areEqual('LastName 2', ((Contact) several[1]).LastName);
+    }
+
+    @IsTest
     static void bulkAutoFillNamesEachRecordAndSharesTheStage()
     {
         Test.startTest();

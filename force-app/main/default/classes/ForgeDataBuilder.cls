@@ -32,9 +32,41 @@ public with sharing class ForgeDataBuilder {
     /** Tells whether the field is a field of the given object type. */
     public static Boolean fieldBelongsTo(SObjectType objectType, SObjectField field)
     {
-        Map<String, SObjectField> fields =
-            objectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
-        return fields.get(String.valueOf(field)) == field;
+        return fieldsOf(objectType).get(String.valueOf(field)) == field;
+    }
+
+    private static final Map<SObjectType, Map<String, SObjectField>> FIELDS_BY_OBJECT =
+        new Map<SObjectType, Map<String, SObjectField>>();
+
+    // Keyed by object and running user, because System.runAs can change which fields are createable.
+    private static final Map<String, List<Schema.DescribeFieldResult>> REQUIRED_FIELDS_BY_OBJECT =
+        new Map<String, List<Schema.DescribeFieldResult>>();
+
+    private static Map<String, SObjectField> fieldsOf(SObjectType objectType)
+    {
+        if (!FIELDS_BY_OBJECT.containsKey(objectType)) {
+            FIELDS_BY_OBJECT.put(objectType,
+                objectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap());
+        }
+        return FIELDS_BY_OBJECT.get(objectType);
+    }
+
+    private static List<Schema.DescribeFieldResult> requiredFieldsOf(SObjectType objectType)
+    {
+        String key = String.valueOf(objectType) + ':' + UserInfo.getUserId();
+        if (!REQUIRED_FIELDS_BY_OBJECT.containsKey(key)) {
+            List<Schema.DescribeFieldResult> required = new List<Schema.DescribeFieldResult>();
+            for (SObjectField field : fieldsOf(objectType).values()) {
+                Schema.DescribeFieldResult describe = field.getDescribe();
+                if (!describe.isCreateable()) { continue; }
+                if (describe.isNillable()) { continue; }
+                if (describe.isDefaultedOnCreate()) { continue; }
+                if (describe.getType() == Schema.DisplayType.REFERENCE) { continue; }
+                required.add(describe);
+            }
+            REQUIRED_FIELDS_BY_OBJECT.put(key, required);
+        }
+        return REQUIRED_FIELDS_BY_OBJECT.get(key);
     }
 
     /** Collects the field values and the record count for one set of test records, then builds or inserts them. */
@@ -153,16 +185,8 @@ public with sharing class ForgeDataBuilder {
         private List<Schema.DescribeFieldResult> requiredFieldsToFill()
         {
             List<Schema.DescribeFieldResult> toFill = new List<Schema.DescribeFieldResult>();
-            Map<String, SObjectField> fields =
-                objectType.getDescribe(SObjectDescribeOptions.DEFERRED).fields.getMap();
-            for (SObjectField field : fields.values()) {
-                if (fieldValues.containsKey(field)) { continue; }
-                Schema.DescribeFieldResult describe = field.getDescribe();
-                if (!describe.isCreateable()) { continue; }
-                if (describe.isNillable()) { continue; }
-                if (describe.isDefaultedOnCreate()) { continue; }
-                if (describe.getType() == Schema.DisplayType.REFERENCE) { continue; }
-                toFill.add(describe);
+            for (Schema.DescribeFieldResult describe : requiredFieldsOf(objectType)) {
+                if (!fieldValues.containsKey(describe.getSObjectField())) { toFill.add(describe); }
             }
             return toFill;
         }
