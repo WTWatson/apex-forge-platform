@@ -35,9 +35,9 @@ side by side.
 - Heap is the exception: the table shows the largest of the five runs. Salesforce
   sometimes counts less memory than a run really holds, but never more, so the
   largest run is the one counted in full.
-- The raw numbers of every run, all five values included, are in
-  `docs/performance/results/<date>-<commit>.json`, with heap under `largest`
-  and every other measure under `median`.
+- Each run's results file, `docs/performance/results/<date>-<commit>.json`, keeps
+  all five runs under `runs`, and the published value of each measure under
+  `median` (heap under `largest`).
 
 ## When a change counts as slower
 
@@ -57,9 +57,9 @@ _Run: 2026-10-13, e2a5cf0, API 66.0_
 | 200     | 411    | 5231 | 0    | 0          | 1   | 200      | 606     | First published run |
 | 2000    |        |      |      |            |     |          |         | Not published yet   |
 
-At 2,000 records this version runs the handler for the first 200 records only, so
-its numbers would understate the cost. The row will be filled in once the handler
-runs for all 2,000.
+The version measured here has a defect that skips every record after the first
+200, so a 2,000-record number would only be the cost of 200. A fix is on its way,
+and this row is filled in once it is merged.
 
 Consumer lines: 15 (with the platform) / 21 (plain Apex)
 

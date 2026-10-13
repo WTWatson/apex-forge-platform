@@ -1,5 +1,8 @@
 # Benchmarks
 
+The benchmarks exist so every change to the platform is measured the same way, and
+its cost is published with it.
+
 Each platform module has a benchmark that drives its public API the way a consumer
 would, at 1, 200 and 2,000 records. The published numbers are in
 `docs/performance/`.
@@ -12,11 +15,11 @@ would, at 1, 200 and 2,000 records. The published numbers are in
 - `scenarios/<module>/` holds the paired consumer samples: `forge.*` is the code a
   developer writes with the platform, `plain.*` the plain-Apex equivalent. Consumer
   lines are the non-blank, non-comment lines of each side.
-- `run-benchmarks.js` runs every scenario five times, one anonymous Apex
-  transaction per run, keeps the median of each measure under `median` and, for
-  heap, the largest run under `largest` (the heap counter sometimes leaves out
-  records a run still holds, never the reverse), writes
-  `docs/performance/results/<date>-<commit>.json` and prints the README rows, the
+- `run-benchmarks.js` runs every scenario five times, each run in its own
+  anonymous Apex transaction. It keeps the median of each measure, except heap,
+  where it keeps the largest run; `docs/performance/README.md` says why. It writes
+  the five runs and the kept values to
+  `docs/performance/results/<date>-<commit>.json`. It prints the README rows, the
   change against the previous results file and any measure over
   `thresholds.json`.
 
