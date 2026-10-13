@@ -75,47 +75,59 @@ public with sharing class ForgeDataSeeder {
         'magna','aliqua','veniam','quis','nostrud','exercitation','ullamco'
     };
 
+    /** Returns a random British first name. */
     public static String firstName() { return pickString(FIRST_NAMES); }
 
+    /** Returns a random British surname. */
     public static String lastName() { return pickString(LAST_NAMES); }
 
+    /** Returns a random British first name and surname. */
     public static String fullName() { return firstName() + ' ' + lastName(); }
 
+    /** Returns a random email address at example.co.uk for a made-up person. */
     public static String email() { return email(firstName(), lastName()); }
 
+    /** Returns an email address at example.co.uk made from the given first name and surname. */
     public static String email(String first, String last)
     {
         return first.toLowerCase() + '.' + last.toLowerCase()
             + '+' + integerBetween(1000, 9999) + '@example.co.uk';
     }
 
+    /** Returns a random British-sounding company name. */
     public static String company()
     {
         return pickString(COMPANY_PREFIXES) + ' ' + pickString(COMPANY_SUFFIXES);
     }
 
+    /** Returns a random UK mobile number. */
     public static String phone()
     {
         return '07' + integerBetween(100, 999)
             + ' ' + integerBetween(100000, 999999);
     }
 
+    /** Returns a random UK street address with a house number. */
     public static String streetAddress()
     {
         return integerBetween(1, 9999) + ' '
             + pickString(STREETS) + ' ' + pickString(STREET_SUFFIXES);
     }
 
+    /** Returns a random English city. */
     public static String city() { return pickString(CITIES); }
 
+    /** Returns a random UK-style postcode. */
     public static String postalCode()
     {
         return pickString(POSTCODE_AREAS) + integerBetween(1, 20)
             + ' ' + integerBetween(1, 9) + pickString(ALPHA) + pickString(ALPHA);
     }
 
+    /** Returns one random lorem ipsum word. */
     public static String word() { return pickString(LOREM); }
 
+    /** Returns a lorem ipsum sentence of the given number of words, at least one. */
     public static String sentence(Integer words)
     {
         if (words == null || words < 1) { words = 1; }
@@ -125,6 +137,7 @@ public with sharing class ForgeDataSeeder {
         return s.substring(0, 1).toUpperCase() + s.substring(1) + '.';
     }
 
+    /** Returns a lorem ipsum paragraph of the given number of sentences, at least one. */
     public static String paragraph(Integer sentences)
     {
         if (sentences == null || sentences < 1) { sentences = 1; }
@@ -135,12 +148,14 @@ public with sharing class ForgeDataSeeder {
         return String.join(parts, ' ');
     }
 
+    /** Returns a random whole number between the two bounds, both included, given in either order. */
     public static Integer integerBetween(Integer lo, Integer hi)
     {
         if (lo > hi) { Integer t = lo; lo = hi; hi = t; }
         return lo + (Integer) (Math.random() * (hi - lo + 1));
     }
 
+    /** Returns a random decimal between the two bounds, given in either order, with the given number of decimal places. */
     public static Decimal decimalBetween(Decimal lo, Decimal hi, Integer scale)
     {
         if (lo > hi) { Decimal t = lo; lo = hi; hi = t; }
@@ -148,6 +163,7 @@ public with sharing class ForgeDataSeeder {
         return v.setScale(scale);
     }
 
+    /** Returns a random date between the two dates, both included, given in either order. */
     public static Date dateBetween(Date lo, Date hi)
     {
         Integer days = lo.daysBetween(hi);
@@ -155,6 +171,7 @@ public with sharing class ForgeDataSeeder {
         return lo.addDays(integerBetween(0, days));
     }
 
+    /** Returns a random date and time between the two, given in either order. */
     public static Datetime datetimeBetween(Datetime lo, Datetime hi)
     {
         Long loMs = lo.getTime();
@@ -164,29 +181,35 @@ public with sharing class ForgeDataSeeder {
         return Datetime.newInstance(loMs + offset);
     }
 
+    /** Returns true or false at random, with even odds. */
     public static Boolean coinFlip() { return Math.random() < 0.5; }
 
+    /** Returns one of the given choices at random, or null when there are none. */
     public static Object pickFrom(List<Object> choices)
     {
         if (choices == null || choices.isEmpty()) { return null; }
         return choices[integerBetween(0, choices.size() - 1)];
     }
 
+    /** Gives each built record a numbered value from the prefix, such as 'Account 1', 'Account 2'. */
     public static ForgeDataBuilder.ValueProvider sequence(String prefix)
     {
         return new SequenceProvider(prefix);
     }
 
+    /** Gives each built record a different British first name, in turn. */
     public static ForgeDataBuilder.ValueProvider firstNames()
     {
         return new CycleProvider(FIRST_NAMES);
     }
 
+    /** Gives each built record a different British surname, in turn. */
     public static ForgeDataBuilder.ValueProvider lastNames()
     {
         return new CycleProvider(LAST_NAMES);
     }
 
+    /** Gives each built record its own numbered email address at example.co.uk. */
     public static ForgeDataBuilder.ValueProvider emails()
     {
         return new EmailProvider();
