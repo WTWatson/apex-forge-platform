@@ -10,5 +10,5 @@
 public with sharing class ForgeTestProductHandlers {
 
     /** The handlers a test wants the Product2 test trigger to run, in order. */
-    public static List<ForgeTriggerHandler> active = new List<ForgeTriggerHandler>();
+    public static List<ForgeTriggerHandler> toRun = new List<ForgeTriggerHandler>();
 }

@@ -155,28 +155,22 @@ private class ForgeTriggerHandlerTest {
         ForgeTriggerHandler.clearAllBypasses();
     }
 
-    // The tests below run through ForgeTestProductTrigger, a real trigger on Product2.
+    // The tests below call handle() directly, as a trigger would, so they need no trigger.
+    // ForgeTriggerHandlerOnProductTest in test-support runs the same rules through a real one.
 
-    private class ProductCountingHandler extends ForgeTriggerHandler {
-        public Map<System.TriggerOperation, Integer> recordsHandled =
-            new Map<System.TriggerOperation, Integer>();
+    private class RunCountingHandler extends ForgeTriggerHandler {
+        public Integer runs = 0;
 
         protected override void onTrigger(ForgeTriggerContext ctx) {
-            Integer handledSoFar = recordsHandled.containsKey(ctx.operationType)
-                ? recordsHandled.get(ctx.operationType) : 0;
-            recordsHandled.put(ctx.operationType, handledSoFar + ctx.newRecords.size());
-        }
-
-        public Integer handledOn(System.TriggerOperation operation) {
-            return recordsHandled.containsKey(operation) ? recordsHandled.get(operation) : 0;
+            runs++;
         }
     }
 
-    private class SelfRefiringHandler extends ForgeTriggerHandler {
+    private class SelfCallingHandler extends ForgeTriggerHandler {
         private final Integer maxReEntries;
-        public Integer afterInsertRuns = 0;
+        public Integer runs = 0;
 
-        SelfRefiringHandler(Integer maxReEntries) {
+        SelfCallingHandler(Integer maxReEntries) {
             this.maxReEntries = maxReEntries;
         }
 
@@ -185,9 +179,8 @@ private class ForgeTriggerHandlerTest {
         }
 
         protected override void onTrigger(ForgeTriggerContext ctx) {
-            if (ctx.operationType != System.TriggerOperation.AFTER_INSERT) { return; }
-            afterInsertRuns++;
-            insert new Product2(Name = 'Re-fired ' + afterInsertRuns);
+            runs++;
+            handle();
         }
     }
 
@@ -204,131 +197,76 @@ private class ForgeTriggerHandlerTest {
         }
     }
 
-    private static List<Product2> newProducts(Integer count)
+    @IsTest
+    static void runsOneAfterAnotherAllGoAhead()
     {
-        List<Product2> products = new List<Product2>();
-        for (Integer i = 0; i < count; i++)
-        {
-            products.add(new Product2(Name = 'Product ' + i));
-        }
-        return products;
+        RunCountingHandler handler = new RunCountingHandler();
+
+        Test.startTest();
+        handler.handle();
+        handler.handle();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(3, handler.runs,
+            'Runs that follow one another are not re-entry and should all go ahead');
+        Assert.areEqual(3, ForgeTriggerHandler.getRunCount('RunCountingHandler'),
+            'The run count should count every run that happened');
     }
 
     @IsTest
-    static void everyRecordIsHandledWhenOneInsertSpansManyChunks()
+    static void handlerCallingItselfIsStoppedAtTheDefaultLimit()
     {
-        ProductCountingHandler handler = new ProductCountingHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
+        SelfCallingHandler handler = new SelfCallingHandler(1);
 
         Test.startTest();
-        insert newProducts(2000);
+        handler.handle();
         Test.stopTest();
 
-        Assert.areEqual(2000, handler.handledOn(System.TriggerOperation.BEFORE_INSERT),
-            'Every chunk of a large insert should reach the handler before insert');
-        Assert.areEqual(2000, handler.handledOn(System.TriggerOperation.AFTER_INSERT),
-            'Every chunk of a large insert should reach the handler after insert');
-        Assert.areEqual(20, ForgeTriggerHandler.getRunCount('ProductCountingHandler'),
-            'Ten chunks of 200, before and after insert, should be twenty runs');
-    }
-
-    @IsTest
-    static void oneHandlerRunsOnBothBeforeAndAfterInsert()
-    {
-        ProductCountingHandler handler = new ProductCountingHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
-
-        Test.startTest();
-        insert newProducts(5);
-        Test.stopTest();
-
-        Assert.areEqual(5, handler.handledOn(System.TriggerOperation.BEFORE_INSERT),
-            'The handler should run before insert');
-        Assert.areEqual(5, handler.handledOn(System.TriggerOperation.AFTER_INSERT),
-            'The handler should run after insert as well');
-    }
-
-    @IsTest
-    static void insertThenUpdateInOneTransactionBothRun()
-    {
-        ProductCountingHandler handler = new ProductCountingHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
-        List<Product2> products = newProducts(3);
-
-        Test.startTest();
-        insert products;
-        for (Product2 product : products) { product.Description = 'Updated'; }
-        update products;
-        Test.stopTest();
-
-        Assert.areEqual(3, handler.handledOn(System.TriggerOperation.AFTER_INSERT),
-            'The handler should run for the insert');
-        Assert.areEqual(3, handler.handledOn(System.TriggerOperation.AFTER_UPDATE),
-            'The handler should run again for the later update');
-    }
-
-    @IsTest
-    static void singleRecordIsHandledOncePerEvent()
-    {
-        ProductCountingHandler handler = new ProductCountingHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
-
-        Test.startTest();
-        insert new Product2(Name = 'Single');
-        Test.stopTest();
-
-        Assert.areEqual(1, handler.handledOn(System.TriggerOperation.BEFORE_INSERT));
-        Assert.areEqual(1, handler.handledOn(System.TriggerOperation.AFTER_INSERT));
-        Assert.areEqual(2, ForgeTriggerHandler.getRunCount('ProductCountingHandler'),
-            'One record should give one run before and one after insert');
-    }
-
-    @IsTest
-    static void handlerRefiringItselfIsStoppedAtTheDefaultLimit()
-    {
-        SelfRefiringHandler handler = new SelfRefiringHandler(1);
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
-
-        Test.startTest();
-        insert new Product2(Name = 'Original');
-        Test.stopTest();
-
-        Assert.areEqual(1, handler.afterInsertRuns,
+        Assert.areEqual(1, handler.runs,
             'With the default limit the handler should not run inside its own run');
-        Assert.areEqual(2, [SELECT COUNT() FROM Product2],
-            'Only the original and the first re-fired product should exist');
     }
 
     @IsTest
     static void raisingTheLimitAllowsOneMoreNestedLevel()
     {
-        SelfRefiringHandler handler = new SelfRefiringHandler(2);
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
+        SelfCallingHandler handler = new SelfCallingHandler(2);
 
         Test.startTest();
-        insert new Product2(Name = 'Original');
+        handler.handle();
         Test.stopTest();
 
-        Assert.areEqual(2, handler.afterInsertRuns,
+        Assert.areEqual(2, handler.runs,
             'A limit of two should allow exactly one nested run');
-        Assert.areEqual(3, [SELECT COUNT() FROM Product2],
-            'The original plus one re-fired product per run should exist');
+    }
+
+    @IsTest
+    static void handlerStoppedFromNestingStillRunsNextTime()
+    {
+        SelfCallingHandler handler = new SelfCallingHandler(1);
+
+        Test.startTest();
+        handler.handle();
+        handler.handle();
+        Test.stopTest();
+
+        Assert.areEqual(2, handler.runs,
+            'Each outer run should go ahead once the previous one has finished');
     }
 
     @IsTest
     static void bypassWinsOverEveryRun()
     {
-        ProductCountingHandler handler = new ProductCountingHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
-        ForgeTriggerHandler.bypass('ProductCountingHandler');
+        RunCountingHandler handler = new RunCountingHandler();
+        ForgeTriggerHandler.bypass('RunCountingHandler');
 
         Test.startTest();
-        insert newProducts(201);
+        handler.handle();
+        handler.handle();
         Test.stopTest();
 
-        Assert.areEqual(0, handler.handledOn(System.TriggerOperation.BEFORE_INSERT),
-            'A bypassed handler should handle no records');
-        Assert.areEqual(0, ForgeTriggerHandler.getRunCount('ProductCountingHandler'),
+        Assert.areEqual(0, handler.runs, 'A bypassed handler should not run');
+        Assert.areEqual(0, ForgeTriggerHandler.getRunCount('RunCountingHandler'),
             'A bypassed handler should record no runs');
     }
 
@@ -336,22 +274,21 @@ private class ForgeTriggerHandlerTest {
     static void handlerRunsAgainAfterAFailedRun()
     {
         FailOnceHandler handler = new FailOnceHandler();
-        ForgeTestProductHandlers.active = new List<ForgeTriggerHandler>{ handler };
 
         Test.startTest();
         try
         {
-            insert new Product2(Name = 'Fails');
-            Assert.fail('The first insert should fail in the handler');
+            handler.handle();
+            Assert.fail('The first run should fail');
         }
-        catch (DmlException e)
+        catch (IllegalArgumentException e)
         {
-            Assert.isTrue(e.getMessage().contains('Failing on purpose'), e.getMessage());
+            Assert.areEqual('Failing on purpose', e.getMessage());
         }
-        insert new Product2(Name = 'Succeeds');
+        handler.handle();
         Test.stopTest();
 
-        Assert.areEqual(2, handler.completedRuns,
+        Assert.areEqual(1, handler.completedRuns,
             'A failed run should not leave the handler counted as still running');
     }
 }

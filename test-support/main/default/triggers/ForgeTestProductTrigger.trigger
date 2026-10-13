@@ -8,5 +8,5 @@
  * https://github.com/WTWatson/apex-forge-platform
  */
 trigger ForgeTestProductTrigger on Product2 (before insert, after insert, before update, after update) {
-    if (Test.isRunningTest()) { ForgeTriggerDispatcher.run(ForgeTestProductHandlers.active); }
+    if (Test.isRunningTest()) { ForgeTriggerDispatcher.run(ForgeTestProductHandlers.toRun); }
 }
