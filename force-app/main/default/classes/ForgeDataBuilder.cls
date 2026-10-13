@@ -104,8 +104,10 @@ public with sharing class ForgeDataBuilder {
         public List<SObject> buildList()
         {
             List<SObject> records = new List<SObject>();
-            Map<SObjectField, Schema.DescribeFieldResult> describesByField =
-                autoFillOn ? fieldDescribes() : null;
+            List<Schema.DescribeFieldResult> toFill = autoFillOn
+                ? requiredFieldsToFill() : new List<Schema.DescribeFieldResult>();
+            Map<SObjectField, Object> sameForEveryRecord = valuesSameForEveryRecord(toFill);
+            List<Schema.DescribeFieldResult> variesByRecord = fieldsThatVaryByRecord(toFill);
             for (Integer index = 0; index < recordCount; index++) {
                 SObject record = objectType.newSObject();
                 for (SObjectField field : fieldValues.keySet()) {
@@ -115,7 +117,13 @@ public with sharing class ForgeDataBuilder {
                     }
                     record.put(field, value);
                 }
-                if (autoFillOn) { applyAutoFill(record, describesByField, index); }
+                for (SObjectField field : sameForEveryRecord.keySet()) {
+                    record.put(field, sameForEveryRecord.get(field));
+                }
+                for (Schema.DescribeFieldResult describe : variesByRecord) {
+                    record.put(describe.getSObjectField(),
+                        placeholderFor(describe, describe.getType(), index));
+                }
                 records.add(record);
             }
             return records;
@@ -140,30 +148,48 @@ public with sharing class ForgeDataBuilder {
             return records;
         }
 
-        private Map<SObjectField, Schema.DescribeFieldResult> fieldDescribes()
+        private List<Schema.DescribeFieldResult> requiredFieldsToFill()
         {
-            Map<SObjectField, Schema.DescribeFieldResult> describesByField
-                = new Map<SObjectField, Schema.DescribeFieldResult>();
+            List<Schema.DescribeFieldResult> toFill = new List<Schema.DescribeFieldResult>();
             for (SObjectField field : objectType.getDescribe().fields.getMap().values()) {
-                describesByField.put(field, field.getDescribe());
-            }
-            return describesByField;
-        }
-
-        private void applyAutoFill(SObject record,
-            Map<SObjectField, Schema.DescribeFieldResult> describesByField, Integer index)
-        {
-            for (SObjectField field : describesByField.keySet()) {
                 if (fieldValues.containsKey(field)) { continue; }
-                Schema.DescribeFieldResult describe = describesByField.get(field);
+                Schema.DescribeFieldResult describe = field.getDescribe();
                 if (!describe.isCreateable()) { continue; }
                 if (describe.isNillable()) { continue; }
                 if (describe.isDefaultedOnCreate()) { continue; }
-                Schema.DisplayType fieldType = describe.getType();
-                if (fieldType == Schema.DisplayType.REFERENCE) { continue; }
-                Object placeholder = placeholderFor(describe, fieldType, index);
-                if (placeholder != null) { record.put(field, placeholder); }
+                if (describe.getType() == Schema.DisplayType.REFERENCE) { continue; }
+                toFill.add(describe);
             }
+            return toFill;
+        }
+
+        private Map<SObjectField, Object> valuesSameForEveryRecord(
+            List<Schema.DescribeFieldResult> toFill)
+        {
+            Map<SObjectField, Object> values = new Map<SObjectField, Object>();
+            for (Schema.DescribeFieldResult describe : toFill) {
+                if (variesByRecord(describe.getType())) { continue; }
+                Object placeholder = placeholderFor(describe, describe.getType(), 0);
+                if (placeholder != null) { values.put(describe.getSObjectField(), placeholder); }
+            }
+            return values;
+        }
+
+        private List<Schema.DescribeFieldResult> fieldsThatVaryByRecord(
+            List<Schema.DescribeFieldResult> toFill)
+        {
+            List<Schema.DescribeFieldResult> varying = new List<Schema.DescribeFieldResult>();
+            for (Schema.DescribeFieldResult describe : toFill) {
+                if (variesByRecord(describe.getType())) { varying.add(describe); }
+            }
+            return varying;
+        }
+
+        private Boolean variesByRecord(Schema.DisplayType fieldType)
+        {
+            if (fieldType == Schema.DisplayType.EMAIL || fieldType == Schema.DisplayType.PHONE) { return true; }
+            Boolean isText = fieldType == Schema.DisplayType.STRING || fieldType == Schema.DisplayType.TEXTAREA;
+            return isText && recordCount > 1;
         }
 
         private Object placeholderFor(Schema.DescribeFieldResult describe,
