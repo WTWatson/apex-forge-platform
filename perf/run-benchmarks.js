@@ -34,6 +34,10 @@ const MEASURES = {
   wallTimeMs: "wall_time_ms",
   recordsHandled: "records_handled",
 };
+// Limits.getHeapSize() sometimes leaves out records the scenario still holds, so a
+// run can read far below the others but never above them. The largest of the runs
+// is the one where every record was counted.
+const LARGEST_RUN_MEASURES = ["heap_bytes"];
 const CPU_MEASURES = ["cpu_time_ms"];
 const GOVERNOR_MEASURES = [
   "soql_queries",
@@ -194,7 +198,10 @@ function main() {
       }
       const medianRun = {};
       for (const measure of Object.values(MEASURES)) {
-        medianRun[measure] = median(measured.map((run) => run[measure]));
+        const values = measured.map((run) => run[measure]);
+        medianRun[measure] = LARGEST_RUN_MEASURES.includes(measure)
+          ? Math.max(...values)
+          : median(values);
       }
       results.push({ module, records, median: medianRun, runs: measured });
     }
@@ -251,6 +258,26 @@ function main() {
     for (const entry of shortfalls) {
       console.log(
         `- ${entry.module} ${entry.records}: ${entry.median.records_handled} handled`,
+      );
+    }
+  }
+  const uncountedHeap = results.filter((entry) => {
+    const single = results.find(
+      (each) => each.module === entry.module && each.records === 1,
+    );
+    return (
+      entry.records > 1 &&
+      single &&
+      entry.median.heap_bytes <= single.median.heap_bytes
+    );
+  });
+  if (uncountedHeap.length) {
+    console.log(
+      "\nHeap no larger than at 1 record, so every run probably left records out; run again:",
+    );
+    for (const entry of uncountedHeap) {
+      console.log(
+        `- ${entry.module} ${entry.records}: ${entry.median.heap_bytes} bytes`,
       );
     }
   }
