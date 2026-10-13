@@ -20,7 +20,7 @@ Each module has one table. Each row is one run of the module on a number of reco
 | DML        | Number of insert, update or delete statements. The limit is 150.                     |
 | DML rows   | Records those statements wrote. The limit is 10,000.                                 |
 | Wall ms    | Elapsed time, in milliseconds, as a rough guide only. It varies with the org's load. |
-| Change     | The difference from the previous published run.                                      |
+| Change     | The difference from the previous published version, run again in the same org.       |
 
 Under each table, **consumer lines** compares the Apex you write for one everyday
 task with the platform and without it, in plain Apex. Blank lines and comments are
@@ -30,8 +30,14 @@ side by side.
 ## How the numbers are measured
 
 - A benchmark drives the module's public methods the way your code would.
-- Each module is measured in its own fresh scratch org, five times. The table shows
-  the middle (median) value, so one slow run doesn't skew it.
+- Each version is measured in a fresh scratch org, five times. The table shows the
+  middle (median) value, so one slow run doesn't skew it.
+- CPU time differs between scratch orgs: the same data builder code at 200 records
+  measured 14% slower in a new org than in the one before. So a change is never
+  compared with numbers from another org. The previous published version is deployed to the same org and
+  measured first, then the change is deployed and measured, and the Change column
+  compares the two. The results file keeps the previous version's numbers from that
+  org under `same_org_baseline`.
 - Heap is the memory the measured call added: the heap just after the call minus
   the heap just before it. Records the benchmark builds before the call are not in
   it, and neither is memory the call uses and frees again.
@@ -47,11 +53,22 @@ side by side.
 
 ## When a change counts as slower
 
-If a change makes CPU time, or any of the governor measures (heap, queries, query
-rows, DML statements, DML rows), more than 10% worse than the last published run,
-it is treated as a regression. It must be fixed or explained before it is merged.
-The 10% thresholds are set in `perf/thresholds.json`. Wall time is shown but is not checked.
-Faster numbers are reported too.
+A change counts as a regression when, compared with the previous version in the
+same org, it is worse by more than:
+
+- **25% CPU time.** Five runs of the same code in one org have ranged from 444 to
+  712 ms, so a smaller limit would flag unchanged code.
+- **10% queries, query rows, DML statements or DML rows.** These are exact counts:
+  the same code gives the same number every time.
+- **10% heap, counting only changes of 512 bytes or more.** At 200 and 2,000
+  records the same code's heap repeats within half a percent, so 10% catches real
+  growth. At 1 record the readings are small (about 450 bytes for the trigger
+  handler) and the same code has read up to 63 bytes apart between orgs, more than
+  10% of it. The 512-byte floor keeps that noise from counting.
+
+A regression must be fixed or explained before it is merged. The limits are set
+in `perf/thresholds.json`. Wall time is shown but is not checked. Faster numbers
+are reported too.
 
 ## Trigger handler framework
 
