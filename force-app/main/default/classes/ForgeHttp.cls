@@ -152,7 +152,7 @@ public with sharing class ForgeHttp {
         }
     }
 
-    /** Decides whether a request may be sent, just before it is. */
+    /** Runs just before each request is sent, and stops it by throwing. */
     public interface RequestCheck
     {
         /** Called with the method and the timeout in seconds of the request about to be sent; throws to stop it. */
