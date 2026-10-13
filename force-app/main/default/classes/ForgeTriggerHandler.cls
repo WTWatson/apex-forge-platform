@@ -12,7 +12,7 @@ public virtual with sharing class ForgeTriggerHandler {
     private static final Set<String> bypassedHandlers = new Set<String>();
     private static final Map<String, Integer> activeDepths = new Map<String, Integer>();
 
-    /** How many times this handler may run in one transaction; override it to allow re-entry. */
+    /** How many runs of this handler may be nested inside each other; override it to allow re-entry. */
     public virtual Integer getMaxReEntries() { return 1; }
 
     /** Switches off the handler with this class name for the rest of the transaction, until its bypass is cleared. */
@@ -45,13 +45,13 @@ public virtual with sharing class ForgeTriggerHandler {
         return runCounts.get(handlerName) == null ? 0 : runCounts.get(handlerName);
     }
 
-    /** Forgets every handler's run count so each can run again, for example between steps of a test. */
+    /** Forgets every handler's run count, for example between steps of a test. */
     public static void resetRunCounts()
     {
         runCounts.clear();
     }
 
-    /** Runs this handler for the current trigger event, unless it is switched off or has reached its re-entry limit. */
+    /** Runs this handler for the current trigger event, unless it is switched off or is already running inside itself as deeply as its limit allows. */
     public void handle()
     {
         String handlerName = String.valueOf(this).split(':')[0];
