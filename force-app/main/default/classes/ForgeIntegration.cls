@@ -85,6 +85,7 @@ public abstract with sharing class ForgeIntegration {
     private static List<Id> idsOf(ForgeIntegration integration, List<SObject> records)
     {
         List<Id> ids = new List<Id>();
+        Set<Id> seen = new Set<Id>();
         for (SObject record : records)
         {
             if (record.Id == null)
@@ -92,7 +93,8 @@ public abstract with sharing class ForgeIntegration {
                 throw new StartRefusedException(integration.name() + ' cannot start for a record that is not saved yet;'
                     + ' start it after insert.');
             }
-            ids.add(record.Id);
+            // Each record goes in one call only, so a call that fails can leave no change on another call's record.
+            if (seen.add(record.Id)) { ids.add(record.Id); }
         }
         return ids;
     }

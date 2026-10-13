@@ -69,6 +69,7 @@ private class ForgeIntegrationTest
         protected override void run(List<SObject> records)
         {
             Account account = (Account) records[0];
+            account.Description = 'Rating asked of the ERP';
             String reply = connection(ERP).get('/ratings/' + account.Id).body;
             account.Rating = (String) ((Map<String, Object>) JSON.deserializeUntyped(reply)).get('rating');
         }
@@ -268,25 +269,71 @@ private class ForgeIntegrationTest
     }
 
     @IsTest
-    static void aCallWhoseRunThrowsBecomesAFailureRecordAndTheOthersAreSaved()
+    static void aCallWhoseRunThrowsIsNotRetried()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.Route ratings = ForgeHttpMock.connection(ERP).get('/ratings/' + acme.Id).reply(200, '["Hot"]');
+
+        Test.startTest();
+        ForgeIntegration.start(new ReadCreditRatingsFromJson(), new List<Account>{ acme });
+        Test.stopTest();
+
+        Assert.areEqual(1, ratings.requests().size(), 'a GET is retried after a 503, but not after an error in run');
+        Assert.isNull(ForgeIntegration.followOnHeldForTest);
+        Integration_Failure__c failure = onlyFailure();
+        Assert.areEqual(200, failure.Status__c);
+        Assert.areEqual('["Hot"]', failure.Reply_Body__c);
+        Assert.isTrue(failure.Reason__c.startsWith('The integration failed while handling the reply: System.TypeException: '), failure.Reason__c);
+    }
+
+    @IsTest
+    static void aCallWhoseRunThrowsSavesNoneOfItsChanges()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.connection(ERP).get('/ratings/' + acme.Id).reply(200, '["Hot"]');
+
+        Test.startTest();
+        ForgeIntegration.start(new ReadCreditRatingsFromJson(), new List<Account>{ acme });
+        Test.stopTest();
+
+        Account saved = [SELECT Description, Rating FROM Account WHERE Id = :acme.Id];
+        Assert.isNull(saved.Description, 'run set it before the error, and it is discarded');
+        Assert.isNull(saved.Rating);
+        Assert.areEqual(acme.Id, onlyFailure().Record_Ids__c);
+    }
+
+    @IsTest
+    static void theCallsAfterOneWhoseRunThrowsStillCallOutAndAreSaved()
     {
         List<Account> accounts = newAccounts(2);
-        Account readable = accounts[0];
-        Account unreadable = accounts[1];
-        ForgeHttpMock.connection(ERP).get('/ratings/' + readable.Id).reply(200, '{"rating":"Hot"}');
+        Account unreadable = accounts[0];
+        Account readable = accounts[1];
         ForgeHttpMock.connection(ERP).get('/ratings/' + unreadable.Id).reply(200, '["Hot"]');
+        ForgeHttpMock.Route laterCall = ForgeHttpMock.connection(ERP).get('/ratings/' + readable.Id).reply(200, '{"rating":"Hot"}');
 
         Test.startTest();
         ForgeIntegration.start(new ReadCreditRatingsFromJson(), accounts);
         Test.stopTest();
 
+        // Had the failure record been written before the later callout, Salesforce would have refused that callout.
+        Assert.areEqual(1, laterCall.requests().size());
         Assert.areEqual('Hot', [SELECT Rating FROM Account WHERE Id = :readable.Id].Rating);
-        Assert.isNull([SELECT Rating FROM Account WHERE Id = :unreadable.Id].Rating);
-        Integration_Failure__c failure = onlyFailure();
-        Assert.areEqual(unreadable.Id, failure.Record_Ids__c);
-        Assert.areEqual(200, failure.Status__c);
-        Assert.areEqual('["Hot"]', failure.Reply_Body__c);
-        Assert.isTrue(failure.Reason__c.startsWith('The integration failed while handling the reply: System.TypeException: '), failure.Reason__c);
+        Assert.areEqual(unreadable.Id, onlyFailure().Record_Ids__c);
+    }
+
+    @IsTest
+    static void aRecordStartedTwiceIsSentOnce()
+    {
+        Account acme = newAccounts(1)[0];
+        ForgeHttpMock.Route ratings = ForgeHttpMock.connection(ERP).get('/ratings/' + acme.Id).reply(200, '{"rating":"Hot"}');
+
+        Test.startTest();
+        ForgeIntegration.start(new ReadCreditRatingsFromJson(), new List<Account>{ acme, acme });
+        Test.stopTest();
+
+        Assert.areEqual(1, ratings.requests().size());
+        Assert.areEqual('Hot', [SELECT Rating FROM Account WHERE Id = :acme.Id].Rating);
+        Assert.areEqual(0, [SELECT COUNT() FROM Integration_Failure__c]);
     }
 
     @IsTest
