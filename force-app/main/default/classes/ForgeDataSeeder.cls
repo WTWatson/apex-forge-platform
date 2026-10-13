@@ -1,7 +1,7 @@
 /**
  * This file is part of the Forge Platform project
  *
- * Seed-value helper for tests: UK-flavored names, addresses, phone numbers,
+ * Gives tests realistic made-up values: UK-flavored names, addresses, phone numbers,
  * postcodes, and companies; plus lorem text and range-bounded primitives.
  * Also provides ForgeDataBuilder.ValueProvider implementations (sequence, firstNames,
  * lastNames, emails) for per-record variation under .count(n).
@@ -149,36 +149,36 @@ public with sharing class ForgeDataSeeder {
     }
 
     /** Returns a random whole number between the two bounds, both included, given in either order. */
-    public static Integer integerBetween(Integer lo, Integer hi)
+    public static Integer integerBetween(Integer low, Integer high)
     {
-        if (lo > hi) { Integer t = lo; lo = hi; hi = t; }
-        return lo + (Integer) (Math.random() * (hi - lo + 1));
+        if (low > high) { Integer swap = low; low = high; high = swap; }
+        return low + (Integer) (Math.random() * (high - low + 1));
     }
 
     /** Returns a random decimal between the two bounds, given in either order, with the given number of decimal places. */
-    public static Decimal decimalBetween(Decimal lo, Decimal hi, Integer scale)
+    public static Decimal decimalBetween(Decimal low, Decimal high, Integer scale)
     {
-        if (lo > hi) { Decimal t = lo; lo = hi; hi = t; }
-        Decimal v = lo + (hi - lo) * Decimal.valueOf(Math.random());
-        return v.setScale(scale);
+        if (low > high) { Decimal swap = low; low = high; high = swap; }
+        Decimal value = low + (high - low) * Decimal.valueOf(Math.random());
+        return value.setScale(scale);
     }
 
     /** Returns a random date between the two dates, both included, given in either order. */
-    public static Date dateBetween(Date lo, Date hi)
+    public static Date dateBetween(Date earliest, Date latest)
     {
-        Integer days = lo.daysBetween(hi);
-        if (days < 0) { Date t = lo; lo = hi; hi = t; days = -days; }
-        return lo.addDays(integerBetween(0, days));
+        Integer days = earliest.daysBetween(latest);
+        if (days < 0) { Date swap = earliest; earliest = latest; latest = swap; days = -days; }
+        return earliest.addDays(integerBetween(0, days));
     }
 
     /** Returns a random date and time between the two, given in either order. */
-    public static Datetime datetimeBetween(Datetime lo, Datetime hi)
+    public static Datetime datetimeBetween(Datetime earliest, Datetime latest)
     {
-        Long loMs = lo.getTime();
-        Long hiMs = hi.getTime();
-        if (loMs > hiMs) { Long t = loMs; loMs = hiMs; hiMs = t; }
-        Long offset = (Long) ((hiMs - loMs) * Math.random());
-        return Datetime.newInstance(loMs + offset);
+        Long earliestMs = earliest.getTime();
+        Long latestMs = latest.getTime();
+        if (earliestMs > latestMs) { Long swap = earliestMs; earliestMs = latestMs; latestMs = swap; }
+        Long offset = (Long) ((latestMs - earliestMs) * Math.random());
+        return Datetime.newInstance(earliestMs + offset);
     }
 
     /** Returns true or false at random, with even odds. */
@@ -223,21 +223,21 @@ public with sharing class ForgeDataSeeder {
 
     private class SequenceProvider implements ForgeDataBuilder.ValueProvider {
         private final String prefix;
-        public SequenceProvider(String p) { this.prefix = p; }
-        public Object get(Integer i) { return prefix + ' ' + (i + 1); }
+        public SequenceProvider(String prefix) { this.prefix = prefix; }
+        public Object get(Integer index) { return prefix + ' ' + (index + 1); }
     }
 
     private class CycleProvider implements ForgeDataBuilder.ValueProvider {
-        private final List<String> source;
-        public CycleProvider(List<String> s) { this.source = s; }
-        public Object get(Integer i) {
-            return source[Math.mod(i, source.size())];
+        private final List<String> names;
+        public CycleProvider(List<String> names) { this.names = names; }
+        public Object get(Integer index) {
+            return names[Math.mod(index, names.size())];
         }
     }
 
     private class EmailProvider implements ForgeDataBuilder.ValueProvider {
-        public Object get(Integer i) {
-            return 'user' + (i + 1) + '+' + integerBetween(1000, 9999) + '@example.co.uk';
+        public Object get(Integer index) {
+            return 'user' + (index + 1) + '+' + integerBetween(1000, 9999) + '@example.co.uk';
         }
     }
 }
