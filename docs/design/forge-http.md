@@ -125,17 +125,24 @@ limit, retry loops, an `HttpCalloutMock` class per test.
 - **Which fields**: the job queries every field of the object that the running
   user can read. `run` needs no field list. A record that was deleted, or that the
   user can no longer see, is skipped and recorded as a failure.
-- **Calls**: the records are split into calls of `recordsPerCall()`. Before each
-  call the job checks it still has room: under 100 callouts, and at least the
-  connection's timeout left of the 120 seconds a transaction may spend waiting on
-  callouts. If not, it stops calling and passes the rest to a follow-on job.
+- **Calls**: the records are split into calls of `recordsPerCall()`. One call is
+  one `run` for those records, and it may send several requests. Before each
+  request the platform checks the job still has room: under 100 callouts, and at
+  least that request's timeout, as set when it is sent, left of the 120 seconds a
+  transaction may spend waiting on callouts. If not, the call stops there, sends
+  nothing more, and is passed to a follow-on job under the retry rule below, as
+  are the calls after it.
 - **Retry**: a timeout or a 502, 503 or 504 reply is retried, at most 3 attempts,
-  in a follow-on job queued with a delay of 1, then 5 minutes. A GET, PUT or
-  `remove` is retried by default. A POST or PATCH is retried only when the
-  integration says `repeatsAreSafe()`, because the other system may have acted on a
-  call whose reply was lost. Every call carries an `Idempotency-Key` header that
-  stays the same across retries of that call, for systems that honour it. When
-  `run` opens more than one connection, each request gets its own key.
+  in a follow-on job queued with a delay of 1, then 5 minutes. A call is always
+  repeated whole, from the start of `run`, so it is retried only when every
+  request it has already sent may be repeated. A GET, PUT or `remove` may be
+  repeated by default. A POST or PATCH may be repeated only when the integration
+  says `repeatsAreSafe()`, because the other system may have acted on a request
+  whose reply was lost, or on one that succeeded before a later request in the same
+  call failed. A call that cannot be repeated gets a failure record instead. Every
+  request carries an `Idempotency-Key` header that stays the same across retries of
+  that call, for systems that honour it. When `run` sends more than one request,
+  each gets its own key.
 - **Completed calls are kept**: a call that succeeded is never sent again. After
   the job's last call, the platform saves the changes from every call that
   succeeded, even if a later call failed.
@@ -149,8 +156,8 @@ limit, retry loops, an `HttpCalloutMock` class per test.
   saves all the job's records in one update with partial success allowed.
 - **Edits made during the job**: another user's edit to a different field is
   kept; an edit to the same field is overwritten.
-- **A record that fails to save** gets a failure record holding the reply for it,
-  so the other system's answer (the customer number) is not lost.
+- **A record that fails to save** gets a failure record holding the changes that
+  were not saved, so the other system's answer (the customer number) is not lost.
 - **The trigger on that update**: the update runs the Account trigger. The
   platform switches off only that integration while it saves, so the save does not
   start it again; the object's other trigger logic runs as usual.
@@ -162,10 +169,16 @@ limit, retry loops, an `HttpCalloutMock` class per test.
       insert ErpWelcomeTask.forEach((List<Account>) records);
   }
   ```
+  If `afterCalls` throws, its own changes are undone and the job writes a failure
+  record with the error. The records saved before it stay saved, and the job
+  still queues its follow-on.
 - **Follow-on jobs**: a job queues at most one follow-on, after its save. It
   carries the calls not yet sent and the calls due for retry. If the org's limit on
-  chained jobs (5 in developer and scratch orgs) would be passed, the calls not
-  sent are recorded as failures instead of being dropped.
+  chained jobs (5 in developer and scratch orgs) would be passed, or the
+  transaction has already queued its one job (from `afterCalls` or other trigger
+  logic), the calls not sent are recorded as failures instead of being dropped.
+  Only an error Apex cannot catch, such as a governor limit, still ends the job
+  and undoes its save.
 
 ### Failures
 
