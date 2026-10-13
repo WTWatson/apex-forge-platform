@@ -9,11 +9,16 @@
  * A change is compared with the last published commit measured in the same org,
  * because CPU time moves between orgs by more than a real slowdown would. So a
  * measurement is two passes in one org: first deploy force-app at the last published
- * commit and run with --baseline, then deploy the change and run without it.
+ * commit and run with --baseline, then deploy the change and run without it. Both
+ * passes record the org's Id, and the second refuses a baseline from another org.
  * perf/benchmarks must be deployed too. Each run is one anonymous Apex transaction, so
  * every measurement starts with fresh limits.
  * --rebuild needs no org: it works the kept values out again from the runs already in
- * a results file, and rewrites it.
+ * a results file, and rewrites it. It only reports, and never fails on a comparison.
+ *
+ * Exit codes: 2 when a measure is worse than its threshold; 3 when a size published
+ * before could not be compared, because the same-org re-run did not handle every
+ * record. On 3 nothing is written to docs/performance/results.
  */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -63,6 +68,8 @@ const COUNT_MEASURES = [
 ];
 const HEAP_MEASURES = ["heap_bytes"];
 const NOT_PUBLISHED = "Not published yet";
+const EXIT_REGRESSION = 2;
+const EXIT_UNCOMPARED = 3;
 
 function readArguments() {
   const args = process.argv.slice(2);
@@ -217,7 +224,7 @@ function changesAgainst(earlier, baseline, entry, thresholds) {
   }
   const regressions = [];
   const moves = [];
-  const limitFor = (measure) =>
+  const thresholdFor = (measure) =>
     CPU_MEASURES.includes(measure)
       ? thresholds.cpu_time
       : HEAP_MEASURES.includes(measure)
@@ -240,7 +247,7 @@ function changesAgainst(earlier, baseline, entry, thresholds) {
       continue;
     }
     const change = was === 0 ? Infinity : (now - was) / was;
-    if (Math.abs(change) > limitFor(measure)) {
+    if (Math.abs(change) > thresholdFor(measure)) {
       const percent = Number.isFinite(change)
         ? `${change > 0 ? "+" : ""}${Math.round(change * 100)}%`
         : `${was} -> ${now}`;
@@ -258,6 +265,46 @@ function changesAgainst(earlier, baseline, entry, thresholds) {
   };
 }
 
+/** Compares every scenario of a run with its same-org baseline, and says which measures regressed and which sizes could not be compared. */
+function compareWithBaseline(run, earlier, thresholds) {
+  const changes = new Map();
+  const regressions = [];
+  const uncompared = [];
+  for (const entry of run.results) {
+    const change = changesAgainst(
+      earlier,
+      run.same_org_baseline,
+      entry,
+      thresholds,
+    );
+    changes.set(entry, change.summary);
+    regressions.push(...change.regressions);
+    if (change.uncompared) {
+      uncompared.push(`${entry.module} ${entry.records}`);
+    }
+  }
+  return { changes, regressions, uncompared };
+}
+
+/** The exit code of a run: a size that could not be compared fails first, because then nothing is published. */
+function exitCodeFor(comparison, rebuild) {
+  if (rebuild) {
+    return 0;
+  }
+  if (comparison.uncompared.length) {
+    return EXIT_UNCOMPARED;
+  }
+  return comparison.regressions.length ? EXIT_REGRESSION : 0;
+}
+
+/** The org's Id, which stays the same whatever alias the org is known by. */
+function orgId(org) {
+  const output = execFileSync("sf", ["org", "display", "-o", org, "--json"], {
+    encoding: "utf8",
+  });
+  return JSON.parse(output).result.id;
+}
+
 /** The commit of the newest force-app change in this checkout. */
 function checkedOutCommit() {
   return execFileSync(
@@ -267,8 +314,8 @@ function checkedOutCommit() {
   ).trim();
 }
 
-/** Runs every scenario in the org and returns a new results file, with the time it was run. */
-function measureInOrg(org, runs, commit) {
+/** Runs every scenario in the org and returns a new results file, with the time it was run and the org's Id. */
+function measureInOrg(org, id, runs, commit) {
   const apiVersion = JSON.parse(
     fs.readFileSync(path.join(ROOT, "sfdx-project.json"), "utf8"),
   ).sourceApiVersion;
@@ -292,6 +339,7 @@ function measureInOrg(org, runs, commit) {
     date: runAt.slice(0, 10),
     run_at: runAt,
     commit,
+    org_id: id,
     api_version: apiVersion,
     runs,
     results,
@@ -308,6 +356,7 @@ function rebuilt(file) {
     date: old.date,
     ...(old.run_at && { run_at: old.run_at }),
     commit: old.commit,
+    ...(old.org_id && { org_id: old.org_id }),
     api_version: old.api_version,
     runs: old.runs,
     results: resummarized(old.results),
@@ -321,23 +370,65 @@ function rebuilt(file) {
   };
 }
 
-/** The --baseline pass in the given org, which must be a re-run of the last published commit. */
-function sameOrgBaseline(org, lastPublished) {
-  const file = path.join(SAME_ORG_DIR, `${org}.json`);
-  if (!fs.existsSync(file)) {
+/** Where an org's --baseline pass is kept: under the org's Id, so every alias of the same org finds it. */
+function sameOrgFile(id) {
+  return path.join(SAME_ORG_DIR, `${id}.json`);
+}
+
+/** Runs the last published commit in the org as the --baseline pass, and keeps it for the change's pass. */
+function measureSameOrgBaseline(org, runs, lastPublished) {
+  if (!lastPublished) {
     throw new Error(
-      `No same-org baseline for ${org}. Deploy force-app at ${lastPublished.commit} and run with --baseline first.`,
+      "Nothing is published yet, so there is no baseline to re-run.",
     );
   }
-  const baseline = JSON.parse(fs.readFileSync(file, "utf8"));
+  const id = orgId(org);
+  process.stderr.write(
+    `Measuring ${org} (${id}) as ${lastPublished.commit}, the last published commit.\n`,
+  );
+  const rerun = measureInOrg(org, id, runs, lastPublished.commit);
+  fs.mkdirSync(SAME_ORG_DIR, { recursive: true });
+  fs.writeFileSync(sameOrgFile(id), JSON.stringify(rerun, null, 2) + "\n");
+  printTables(rerun, (entry) =>
+    entry.complete ? "same-org baseline" : NOT_PUBLISHED,
+  );
+  printWarnings(rerun.results);
+  console.log(
+    `\nSame-org baseline: perf/.same-org/${id}.json. Now deploy the change and run without --baseline.`,
+  );
+}
+
+/** Reads the org's --baseline pass, refused unless it re-ran the last published commit in this org. */
+function sameOrgBaseline(org, id, lastPublished) {
+  const file = sameOrgFile(id);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `No same-org baseline for ${org} (${id}). Deploy force-app at ${lastPublished.commit} and run with --baseline first.`,
+    );
+  }
+  return checkedSameOrgBaseline(
+    JSON.parse(fs.readFileSync(file, "utf8")),
+    id,
+    lastPublished,
+  );
+}
+
+/** Returns the baseline pass if it was measured in the org with this Id at the last published commit, and throws otherwise. */
+function checkedSameOrgBaseline(baseline, id, lastPublished) {
+  if (baseline.org_id !== id) {
+    throw new Error(
+      `The baseline was measured in org ${baseline.org_id ?? "(not recorded)"}, not in ${id}. Run --baseline again in this org.`,
+    );
+  }
   if (baseline.commit !== lastPublished.commit) {
     throw new Error(
-      `The baseline for ${org} is ${baseline.commit}, but the last published run is ${lastPublished.commit}. Run --baseline again at ${lastPublished.commit}.`,
+      `The baseline for ${id} is ${baseline.commit}, but the last published run is ${lastPublished.commit}. Run --baseline again at ${lastPublished.commit}.`,
     );
   }
   return baseline;
 }
 
+/** Prints each module's README table; changeFor returns the text of the Change column for one scenario. */
 function printTables(run, changeFor) {
   for (const module of MODULES) {
     console.log(
@@ -401,6 +492,40 @@ function printWarnings(results) {
   }
 }
 
+/** Prints a run's tables and findings, and writes its results file unless it is withheld. */
+function report(run, comparison, withheld) {
+  printTables(run, (entry) => comparison.changes.get(entry));
+  if (run.same_org_baseline) {
+    console.log(
+      `\nCompared with ${run.same_org_baseline.commit}, re-run in the same org at ${run.same_org_baseline.run_at}.`,
+    );
+  }
+  printWarnings(run.results);
+  if (comparison.uncompared.length) {
+    console.log(
+      `\nNot compared, because the same-org re-run did not handle every record; run --baseline again:\n- ${comparison.uncompared.join("\n- ")}`,
+    );
+  }
+  if (comparison.regressions.length) {
+    console.log(
+      `\nRegressions over threshold:\n- ${comparison.regressions.join("\n- ")}`,
+    );
+  }
+  const resultsFile = `${run.date}-${run.commit}.json`;
+  if (withheld) {
+    console.log(
+      `\nNot written to docs/performance/results/${resultsFile}, because a size published before was not compared.`,
+    );
+    return;
+  }
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+  fs.writeFileSync(
+    path.join(RESULTS_DIR, resultsFile),
+    JSON.stringify(run, null, 2) + "\n",
+  );
+  console.log(`\nResults: docs/performance/results/${resultsFile}`);
+}
+
 function main() {
   const { org, rebuild, baseline, runs } = readArguments();
   const thresholds = {
@@ -409,41 +534,22 @@ function main() {
       ? JSON.parse(fs.readFileSync(THRESHOLDS_FILE, "utf8"))
       : {}),
   };
-
+  const lastPublished = earlierResults(Date.now()).at(-1);
   if (baseline) {
-    const lastPublished = earlierResults(Date.now()).at(-1);
-    if (!lastPublished) {
-      throw new Error(
-        "Nothing is published yet, so there is no baseline to re-run.",
-      );
-    }
-    process.stderr.write(
-      `Measuring ${org} as ${lastPublished.commit}, the last published commit.\n`,
-    );
-    const rerun = measureInOrg(org, runs, lastPublished.commit);
-    fs.mkdirSync(SAME_ORG_DIR, { recursive: true });
-    fs.writeFileSync(
-      path.join(SAME_ORG_DIR, `${org}.json`),
-      JSON.stringify(rerun, null, 2) + "\n",
-    );
-    printTables(rerun, (entry) =>
-      entry.complete ? "same-org baseline" : NOT_PUBLISHED,
-    );
-    printWarnings(rerun.results);
-    console.log(
-      `\nSame-org baseline: perf/.same-org/${org}.json. Now deploy the change and run without --baseline.`,
-    );
+    measureSameOrgBaseline(org, runs, lastPublished);
     return;
   }
 
   // Check for the same-org baseline before spending time in the org.
-  const lastPublished = earlierResults(Date.now()).at(-1);
+  const id = rebuild ? undefined : orgId(org);
   const sameOrg =
-    !rebuild && lastPublished && sameOrgBaseline(org, lastPublished);
+    !rebuild && lastPublished && sameOrgBaseline(org, id, lastPublished);
   const run = rebuild
     ? rebuilt(rebuild)
-    : measureInOrg(org, runs, checkedOutCommit());
-  const resultsFile = `${run.date}-${run.commit}.json`;
+    : measureInOrg(org, id, runs, checkedOutCommit());
+  if (sameOrg) {
+    run.same_org_baseline = sameOrg;
+  }
   // Read the earlier files before writing, so an earlier run of the same commit on the
   // same date is still a baseline before its file is replaced. A rebuild is never its
   // own baseline.
@@ -451,47 +557,19 @@ function main() {
     runTime(run),
     rebuild ? path.basename(rebuild) : undefined,
   );
-  if (sameOrg) {
-    run.same_org_baseline = sameOrg;
-  }
-
-  fs.mkdirSync(RESULTS_DIR, { recursive: true });
-  fs.writeFileSync(
-    path.join(RESULTS_DIR, resultsFile),
-    JSON.stringify(run, null, 2) + "\n",
-  );
-
-  const regressions = [];
-  const uncompared = [];
-  printTables(run, (entry) => {
-    const change = changesAgainst(
-      earlier,
-      run.same_org_baseline,
-      entry,
-      thresholds,
-    );
-    regressions.push(...change.regressions);
-    if (change.uncompared) {
-      uncompared.push(`${entry.module} ${entry.records}`);
-    }
-    return change.summary;
-  });
-  if (run.same_org_baseline) {
-    console.log(
-      `\nCompared with ${run.same_org_baseline.commit}, re-run in the same org at ${run.same_org_baseline.run_at}.`,
-    );
-  }
-  printWarnings(run.results);
-  if (uncompared.length) {
-    console.log(
-      `\nNot compared, because the same-org re-run did not handle every record; run --baseline again:\n- ${uncompared.join("\n- ")}`,
-    );
-  }
-  console.log(`\nResults: docs/performance/results/${resultsFile}`);
-  if (regressions.length) {
-    console.log(`\nRegressions over threshold:\n- ${regressions.join("\n- ")}`);
-    process.exitCode = 2;
-  }
+  const comparison = compareWithBaseline(run, earlier, thresholds);
+  process.exitCode = exitCodeFor(comparison, rebuild);
+  report(run, comparison, process.exitCode === EXIT_UNCOMPARED);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  checkedSameOrgBaseline,
+  compareWithBaseline,
+  exitCodeFor,
+  EXIT_REGRESSION,
+  EXIT_UNCOMPARED,
+};

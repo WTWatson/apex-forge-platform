@@ -35,13 +35,20 @@ versions run in the same org, one after the other:
 1. Deploy `force-app` as it was at the last published commit (the `commit` of the
    newest file in `docs/performance/results/`), with `perf/benchmarks`, and run
    `node perf/run-benchmarks.js --org <org> --baseline`. This measures the old
-   code and keeps it in `perf/.same-org/<org>.json`, which is not committed.
+   code and keeps it in `perf/.same-org/<org Id>.json`, which is not committed.
+   The runner reads the org's Id with `sf org display`, so any alias of the same
+   org finds that file, and an alias that now names another org does not.
 2. Deploy the change's `force-app` to the same org and run
    `node perf/run-benchmarks.js --org <org>`. It refuses to start if step 1 is
-   missing or was run on another commit. It compares every measure with step 1,
-   writes the results file with step 1's numbers in it under `same_org_baseline`,
-   and lists every measure over `thresholds.json`. If any is over, it exits with
-   code 2.
+   missing, was run in another org or was run on another commit. It compares
+   every measure with step 1, writes the results file with step 1's numbers in it
+   under `same_org_baseline`, and lists every measure over `thresholds.json`. If
+   any is over, it exits with code 2.
+3. If step 1 did not handle every record of a size that was published before, the
+   change cannot be compared at that size. Then the runner writes no results file
+   and exits with code 3; run both steps again.
+
+`npm run test:perf` checks the comparison with canned results, with no org.
 
 `thresholds.json` allows CPU time 25% and the counts (queries, query rows, DML
 statements, DML rows) 10%. Heap is allowed 10%, but a change smaller than 512
