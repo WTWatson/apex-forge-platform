@@ -30,14 +30,18 @@ side by side.
 ## How the numbers are measured
 
 - A benchmark drives the module's public methods the way your code would.
-- Each version is measured in a fresh scratch org, five times. The table shows the
-  middle (median) value, so one slow run doesn't skew it.
+- Each benchmark run uses one fresh scratch org, and each version is measured in it
+  five times. The table shows the middle (median) value, so one slow run doesn't
+  skew it.
 - CPU time differs between scratch orgs: the same data builder code at 200 records
   measured 14% slower in a new org than in the one before. So a change is never
-  compared with numbers from another org. The previous published version is deployed to the same org and
-  measured first, then the change is deployed and measured, and the Change column
-  compares the two. The results file keeps the previous version's numbers from that
-  org under `same_org_baseline`.
+  compared with numbers from another org. The previous published version is
+  deployed to the same org and measured first, then the change is deployed and
+  measured, and the Change column compares the two. The results file keeps the
+  previous version's numbers from that org under `same_org_baseline`.
+- A size that was published before is published again only if it was compared.
+  If the previous version's run in the same org did not handle every record, the
+  change's numbers are not published, and both versions are measured again.
 - Heap is the memory the measured call added: the heap just after the call minus
   the heap just before it. Records the benchmark builds before the call are not in
   it, and neither is memory the call uses and frees again.
@@ -57,7 +61,7 @@ A change counts as a regression when, compared with the previous version in the
 same org, it is worse by more than:
 
 - **25% CPU time.** Five runs of the same code in one org have ranged from 444 to
-  712 ms, so a smaller limit would flag unchanged code.
+  712 ms, so a smaller threshold would flag unchanged code.
 - **10% queries, query rows, DML statements or DML rows.** These are exact counts:
   the same code gives the same number every time.
 - **10% heap, counting only changes of 512 bytes or more.** At 200 and 2,000
@@ -66,8 +70,8 @@ same org, it is worse by more than:
   handler) and the same code has read up to 63 bytes apart between orgs, more than
   10% of it. The 512-byte floor keeps that noise from counting.
 
-A regression must be fixed or explained before it is merged. The limits are set
-in `perf/thresholds.json`. Wall time is shown but is not checked. Faster numbers
+A regression must be fixed or explained before it is merged. The thresholds are
+set in `perf/thresholds.json`. Wall time is shown but is not checked. Faster numbers
 are reported too.
 
 ## Trigger handler framework
