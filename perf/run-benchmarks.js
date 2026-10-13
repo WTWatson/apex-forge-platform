@@ -3,9 +3,12 @@
  * largest for heap) and writes the results file and the README tables' rows.
  *
  *   node perf/run-benchmarks.js --org <scratch-org-alias> [--runs 5]
+ *   node perf/run-benchmarks.js --rebuild docs/performance/results/<file>.json
  *
  * The org must already have force-app and perf/benchmarks deployed. Each run is one
  * anonymous Apex transaction, so every measurement starts with fresh limits.
+ * --rebuild needs no org: it works the kept values out again from the runs already in
+ * a results file, and rewrites it.
  */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -34,10 +37,11 @@ const MEASURES = {
   wallTimeMs: "wall_time_ms",
   recordsHandled: "records_handled",
 };
-// Limits.getHeapSize() sometimes leaves out records the scenario still holds, so a
-// run can read far below the others but never above them. The largest of the runs
-// is the one where every record was counted; it is written under "largest", every
-// other measure under "median".
+// heap_bytes is the heap the measured call added: Limits.getHeapSize() just after it
+// minus just before it. Records built before the call and memory freed during it are
+// not in it. The counter sometimes leaves out memory a run still holds and has not been
+// seen to over-count, so the largest run is kept, under "largest"; every other measure
+// is the median, under "median". All five runs can still read low.
 const LARGEST_RUN_MEASURES = ["heap_bytes"];
 const CPU_MEASURES = ["cpu_time_ms"];
 const GOVERNOR_MEASURES = [
@@ -47,6 +51,7 @@ const GOVERNOR_MEASURES = [
   "dml_rows",
   "heap_bytes",
 ];
+const NOT_PUBLISHED = "Not published yet";
 
 function readArguments() {
   const args = process.argv.slice(2);
@@ -55,10 +60,13 @@ function readArguments() {
     return at === -1 ? undefined : args[at + 1];
   };
   const org = valueOf("--org");
-  if (!org) {
-    throw new Error("Usage: node perf/run-benchmarks.js --org <alias>");
+  const rebuild = valueOf("--rebuild");
+  if (!org === !rebuild) {
+    throw new Error(
+      "Usage: node perf/run-benchmarks.js --org <alias> | --rebuild <results file>",
+    );
   }
-  return { org, runs: Number(valueOf("--runs") ?? 5) };
+  return { org, rebuild, runs: Number(valueOf("--runs") ?? 5) };
 }
 
 function measureOnce(org, module, records) {
@@ -91,6 +99,36 @@ function measureOnce(org, module, records) {
   return run;
 }
 
+/** Whether every run of a scenario handled all its records; only then is it published or compared. */
+function isComplete(entry) {
+  return entry.runs.every((run) => run.records_handled === entry.records);
+}
+
+/** Works out a scenario's kept values from its runs, or marks it incomplete and keeps only the runs. */
+function summarize(module, records, runs) {
+  if (!isComplete({ records, runs })) {
+    return { module, records, complete: false, runs };
+  }
+  const medianRun = {};
+  const largestRun = {};
+  for (const measure of Object.values(MEASURES)) {
+    const values = runs.map((run) => run[measure]);
+    if (LARGEST_RUN_MEASURES.includes(measure)) {
+      largestRun[measure] = Math.max(...values);
+    } else {
+      medianRun[measure] = median(values);
+    }
+  }
+  return {
+    module,
+    records,
+    complete: true,
+    median: medianRun,
+    largest: largestRun,
+    runs,
+  };
+}
+
 /** The value published for each measure: the median, or the largest run for heap. */
 function kept(entry) {
   return { ...entry.median, ...entry.largest };
@@ -119,30 +157,46 @@ function consumerLines(module) {
   return { forge: count("forge"), plain: count("plain") };
 }
 
-function previousResults(excludeFile) {
-  if (!fs.existsSync(RESULTS_DIR)) {
-    return null;
-  }
-  const files = fs
-    .readdirSync(RESULTS_DIR)
-    .filter((file) => file.endsWith(".json") && file !== excludeFile)
-    .sort();
-  return files.length
-    ? JSON.parse(
-        fs.readFileSync(
-          path.join(RESULTS_DIR, files[files.length - 1]),
-          "utf8",
-        ),
-      )
-    : null;
+/** When a results file was run; a file from before run_at was recorded counts from the start of its date. */
+function runTime(results) {
+  return Date.parse(results.run_at ?? `${results.date}T00:00:00Z`);
 }
 
-function changesAgainst(previous, entry, thresholds) {
-  const before = previous?.results.find(
-    (old) => old.module === entry.module && old.records === entry.records,
-  );
+/** The results files run before the given time, oldest first, leaving out the named file. */
+function earlierResults(before, excludeFile) {
+  if (!fs.existsSync(RESULTS_DIR)) {
+    return [];
+  }
+  return fs
+    .readdirSync(RESULTS_DIR)
+    .filter((file) => file.endsWith(".json") && file !== excludeFile)
+    .map((file) =>
+      JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, file), "utf8")),
+    )
+    .filter((results) => runTime(results) < before)
+    .sort((a, b) => runTime(a) - runTime(b));
+}
+
+/** The latest complete result for the same module and size among earlier results files. */
+function baselineFor(earlier, entry) {
+  for (const results of [...earlier].reverse()) {
+    const before = results.results.find(
+      (old) => old.module === entry.module && old.records === entry.records,
+    );
+    if (before && isComplete(before)) {
+      return before;
+    }
+  }
+  return undefined;
+}
+
+function changesAgainst(earlier, entry, thresholds) {
+  if (!entry.complete) {
+    return { summary: NOT_PUBLISHED, regressions: [] };
+  }
+  const before = baselineFor(earlier, entry);
   if (!before) {
-    return { summary: "first baseline", regressions: [] };
+    return { summary: "First published run", regressions: [] };
   }
   const regressions = [];
   const moves = [];
@@ -177,8 +231,8 @@ function changesAgainst(previous, entry, thresholds) {
   };
 }
 
-function main() {
-  const { org, runs } = readArguments();
+/** Runs every scenario in the org and returns a new results file, with the time it was run. */
+function measureInOrg(org, runs) {
   const commit = execFileSync(
     "git",
     ["-C", ROOT, "log", "-1", "--format=%h", "--", "force-app"],
@@ -187,13 +241,7 @@ function main() {
   const apiVersion = JSON.parse(
     fs.readFileSync(path.join(ROOT, "sfdx-project.json"), "utf8"),
   ).sourceApiVersion;
-  const date = new Date().toISOString().slice(0, 10);
-  const resultsFile = `${date}-${commit}.json`;
-  const thresholds = fs.existsSync(THRESHOLDS_FILE)
-    ? JSON.parse(fs.readFileSync(THRESHOLDS_FILE, "utf8"))
-    : DEFAULT_THRESHOLDS;
-  const previous = previousResults(resultsFile);
-
+  const runAt = new Date().toISOString();
   const results = [];
   for (const module of MODULES) {
     for (const records of RECORD_COUNTS) {
@@ -202,61 +250,79 @@ function main() {
         process.stderr.write(`${module} ${records} run ${run}/${runs}\n`);
         measured.push(measureOnce(org, module, records));
       }
-      const medianRun = {};
-      const largestRun = {};
-      for (const measure of Object.values(MEASURES)) {
-        const values = measured.map((run) => run[measure]);
-        if (LARGEST_RUN_MEASURES.includes(measure)) {
-          largestRun[measure] = Math.max(...values);
-        } else {
-          medianRun[measure] = median(values);
-        }
-      }
-      results.push({
-        module,
-        records,
-        median: medianRun,
-        largest: largestRun,
-        runs: measured,
-      });
+      results.push(summarize(module, records, measured));
     }
   }
-
   const lines = {};
   for (const module of MODULES) {
     lines[module] = consumerLines(module);
   }
+  return {
+    date: runAt.slice(0, 10),
+    run_at: runAt,
+    commit,
+    api_version: apiVersion,
+    runs,
+    results,
+    consumer_lines: lines,
+  };
+}
+
+/** Reads a results file and works its kept values out again from the runs in it. */
+function rebuilt(file) {
+  const old = JSON.parse(fs.readFileSync(file, "utf8"));
+  return {
+    date: old.date,
+    ...(old.run_at && { run_at: old.run_at }),
+    commit: old.commit,
+    api_version: old.api_version,
+    runs: old.runs,
+    results: old.results.map((entry) =>
+      summarize(entry.module, entry.records, entry.runs),
+    ),
+    consumer_lines: old.consumer_lines,
+  };
+}
+
+function main() {
+  const { org, rebuild, runs } = readArguments();
+  const thresholds = fs.existsSync(THRESHOLDS_FILE)
+    ? JSON.parse(fs.readFileSync(THRESHOLDS_FILE, "utf8"))
+    : DEFAULT_THRESHOLDS;
+  const run = rebuild ? rebuilt(rebuild) : measureInOrg(org, runs);
+  const resultsFile = `${run.date}-${run.commit}.json`;
+  // Read the earlier files before writing, so an earlier run of the same commit on the
+  // same date is still a baseline before its file is replaced. A rebuild is never its
+  // own baseline.
+  const earlier = earlierResults(
+    runTime(run),
+    rebuild ? path.basename(rebuild) : undefined,
+  );
 
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
   fs.writeFileSync(
     path.join(RESULTS_DIR, resultsFile),
-    JSON.stringify(
-      {
-        date,
-        commit,
-        api_version: apiVersion,
-        runs,
-        results,
-        consumer_lines: lines,
-      },
-      null,
-      2,
-    ) + "\n",
+    JSON.stringify(run, null, 2) + "\n",
   );
 
+  const { results, consumer_lines: lines } = run;
   const regressions = [];
   for (const module of MODULES) {
     console.log(
-      `\n## ${module}\n\n_Run: ${date}, ${commit}, API ${apiVersion}_\n`,
+      `\n## ${module}\n\n_Run: ${run.date}, ${run.commit}, API ${run.api_version}_\n`,
     );
     console.log(
       "| Records | CPU ms | Heap | SOQL | Query rows | DML | DML rows | Wall ms | Change |",
     );
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const entry of results.filter((each) => each.module === module)) {
-      const m = kept(entry);
-      const change = changesAgainst(previous, entry, thresholds);
+      const change = changesAgainst(earlier, entry, thresholds);
       regressions.push(...change.regressions);
+      if (!entry.complete) {
+        console.log(`| ${entry.records} | | | | | | | | ${change.summary} |`);
+        continue;
+      }
+      const m = kept(entry);
       console.log(
         `| ${entry.records} | ${m.cpu_time_ms} | ${m.heap_bytes} | ${m.soql_queries} | ${m.query_rows} | ${m.dml_statements} | ${m.dml_rows} | ${m.wall_time_ms} | ${change.summary} |`,
       );
@@ -265,14 +331,16 @@ function main() {
       `\nConsumer lines: ${lines[module].forge} (forge) / ${lines[module].plain} (plain)`,
     );
   }
-  const shortfalls = results.filter(
-    (entry) => entry.median.records_handled !== entry.records,
-  );
-  if (shortfalls.length) {
-    console.log("\nScenarios that did not handle every record:");
-    for (const entry of shortfalls) {
+  const incomplete = results.filter((entry) => !entry.complete);
+  if (incomplete.length) {
+    console.log(
+      "\nNot published or compared, because a run did not handle every record:",
+    );
+    for (const entry of incomplete) {
+      const handled = entry.runs.map((each) => each.records_handled);
+      const short = handled.filter((count) => count !== entry.records);
       console.log(
-        `- ${entry.module} ${entry.records}: ${entry.median.records_handled} handled`,
+        `- ${entry.module} ${entry.records}: ${short.length} of ${handled.length} runs short (handled ${handled.join(", ")})`,
       );
     }
   }
@@ -282,7 +350,8 @@ function main() {
     );
     return (
       entry.records > 1 &&
-      single &&
+      entry.complete &&
+      single?.complete &&
       entry.largest.heap_bytes <= single.largest.heap_bytes
     );
   });
