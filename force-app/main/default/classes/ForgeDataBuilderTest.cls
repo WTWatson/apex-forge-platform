@@ -268,7 +268,16 @@ private class ForgeDataBuilderTest {
     }
 
     @IsTest
-    static void bulkAutoFillNumbersTextAndSharesFixedDefaults()
+    static void fieldBelongsToTellsSameNamedFieldsApart()
+    {
+        Assert.isTrue(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Account.Name));
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Contact.Name),
+            'A field of the same name on another object does not belong');
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Contact.LastName));
+    }
+
+    @IsTest
+    static void bulkAutoFillNamesEachRecordAndSharesTheStage()
     {
         Test.startTest();
         List<SObject> opps = ForgeDataBuilder.of(Opportunity.SObjectType)
