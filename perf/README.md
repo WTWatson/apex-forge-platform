@@ -50,7 +50,8 @@ bytes is never counted. `docs/performance/README.md` says why.
 ```bash
 sf org create scratch -f config/project-scratch-def.json --target-dev-hub <dev-hub> --alias <org> -y 1
 
-# Step 1: the last published commit, from a copy outside the worktree
+# Step 1: the last published commit, from a copy outside the worktree. Deploy it
+# from inside the copy: sf's source tracking breaks on paths outside the project.
 mkdir -p <dir> && git archive <last-published-commit> force-app sfdx-project.json | tar -x -C <dir>
 cp -r perf/benchmarks <dir>/
 cd <dir>
@@ -58,8 +59,8 @@ sf project deploy start -o <org> --source-dir force-app --source-dir benchmarks
 cd -
 node perf/run-benchmarks.js --org <org> --baseline
 
-# Step 2: the change
-sf project deploy start -o <org> --source-dir force-app --source-dir perf/benchmarks
+# Step 2: the change, over the files step 1 deployed
+sf project deploy start -o <org> --source-dir force-app --source-dir perf/benchmarks --ignore-conflicts
 node perf/run-benchmarks.js --org <org>
 
 sf org delete scratch -o <org> --no-prompt
