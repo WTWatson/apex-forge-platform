@@ -1,6 +1,6 @@
 /**
- * Runs every module's benchmark in a scratch org, keeps the median of five runs and
- * writes the results file and the README tables' rows.
+ * Runs every module's benchmark in a scratch org, keeps the median of five runs (the
+ * largest for heap) and writes the results file and the README tables' rows.
  *
  *   node perf/run-benchmarks.js --org <scratch-org-alias> [--runs 5]
  *
@@ -36,7 +36,8 @@ const MEASURES = {
 };
 // Limits.getHeapSize() sometimes leaves out records the scenario still holds, so a
 // run can read far below the others but never above them. The largest of the runs
-// is the one where every record was counted.
+// is the one where every record was counted; it is written under "largest", every
+// other measure under "median".
 const LARGEST_RUN_MEASURES = ["heap_bytes"];
 const CPU_MEASURES = ["cpu_time_ms"];
 const GOVERNOR_MEASURES = [
@@ -88,6 +89,11 @@ function measureOnce(org, module, records) {
     run[publishedName] = raw[apexName];
   }
   return run;
+}
+
+/** The value published for each measure: the median, or the largest run for heap. */
+function kept(entry) {
+  return { ...entry.median, ...entry.largest };
 }
 
 function median(values) {
@@ -147,8 +153,8 @@ function changesAgainst(previous, entry, thresholds) {
         ? thresholds.governor
         : null;
   for (const measure of [...CPU_MEASURES, ...GOVERNOR_MEASURES]) {
-    const was = before.median[measure];
-    const now = entry.median[measure];
+    const was = kept(before)[measure];
+    const now = kept(entry)[measure];
     if (was === now) {
       continue;
     }
@@ -197,13 +203,22 @@ function main() {
         measured.push(measureOnce(org, module, records));
       }
       const medianRun = {};
+      const largestRun = {};
       for (const measure of Object.values(MEASURES)) {
         const values = measured.map((run) => run[measure]);
-        medianRun[measure] = LARGEST_RUN_MEASURES.includes(measure)
-          ? Math.max(...values)
-          : median(values);
+        if (LARGEST_RUN_MEASURES.includes(measure)) {
+          largestRun[measure] = Math.max(...values);
+        } else {
+          medianRun[measure] = median(values);
+        }
       }
-      results.push({ module, records, median: medianRun, runs: measured });
+      results.push({
+        module,
+        records,
+        median: medianRun,
+        largest: largestRun,
+        runs: measured,
+      });
     }
   }
 
@@ -239,7 +254,7 @@ function main() {
     );
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const entry of results.filter((each) => each.module === module)) {
-      const m = entry.median;
+      const m = kept(entry);
       const change = changesAgainst(previous, entry, thresholds);
       regressions.push(...change.regressions);
       console.log(
@@ -268,7 +283,7 @@ function main() {
     return (
       entry.records > 1 &&
       single &&
-      entry.median.heap_bytes <= single.median.heap_bytes
+      entry.largest.heap_bytes <= single.largest.heap_bytes
     );
   });
   if (uncountedHeap.length) {
@@ -277,7 +292,7 @@ function main() {
     );
     for (const entry of uncountedHeap) {
       console.log(
-        `- ${entry.module} ${entry.records}: ${entry.median.heap_bytes} bytes`,
+        `- ${entry.module} ${entry.records}: ${entry.largest.heap_bytes} bytes`,
       );
     }
   }
