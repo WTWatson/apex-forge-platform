@@ -1,0 +1,9 @@
+# Apex keeps its Allman brace style (opening brace on its own line), which
+# prettier-plugin-apex cannot produce, so prettier does not touch Apex.
+**/*.cls
+**/*.trigger
+
+# The XML plugin would reformat every -meta.xml file, so XML is left out.
+**/*.xml
+
+package-lock.json
