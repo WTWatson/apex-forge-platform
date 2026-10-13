@@ -8,64 +8,64 @@
       "module": "trigger-handler",
       "records": 1,
       "median": {
-        "cpu_time_ms": 24,
-        "heap_bytes": 431,
+        "cpu_time_ms": 23,
+        "heap_bytes": 455,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 1,
         "dml_rows": 1,
-        "wall_time_ms": 104,
+        "wall_time_ms": 75,
         "records_handled": 1
       },
       "runs": [
         {
-          "cpu_time_ms": 30,
-          "heap_bytes": 391,
+          "cpu_time_ms": 23,
+          "heap_bytes": 313,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 1,
-          "wall_time_ms": 301,
+          "wall_time_ms": 274,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 35,
-          "heap_bytes": 431,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 1,
-          "dml_rows": 1,
-          "wall_time_ms": 104,
-          "records_handled": 1
-        },
-        {
-          "cpu_time_ms": 22,
+          "cpu_time_ms": 23,
           "heap_bytes": 455,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 1,
-          "wall_time_ms": 109,
+          "wall_time_ms": 100,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 24,
-          "heap_bytes": 431,
+          "cpu_time_ms": 17,
+          "heap_bytes": 455,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 1,
-          "wall_time_ms": 74,
+          "wall_time_ms": 64,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 21,
-          "heap_bytes": 391,
+          "cpu_time_ms": 23,
+          "heap_bytes": 455,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 1,
-          "wall_time_ms": 48,
+          "wall_time_ms": 75,
+          "records_handled": 1
+        },
+        {
+          "cpu_time_ms": 16,
+          "heap_bytes": 313,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 1,
+          "dml_rows": 1,
+          "wall_time_ms": 50,
           "records_handled": 1
         }
       ]
@@ -74,64 +74,64 @@
       "module": "trigger-handler",
       "records": 200,
       "median": {
-        "cpu_time_ms": 388,
+        "cpu_time_ms": 382,
         "heap_bytes": 5231,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 1,
         "dml_rows": 200,
-        "wall_time_ms": 569,
+        "wall_time_ms": 540,
         "records_handled": 200
       },
       "runs": [
         {
-          "cpu_time_ms": 389,
+          "cpu_time_ms": 371,
           "heap_bytes": 5231,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 200,
-          "wall_time_ms": 583,
+          "wall_time_ms": 509,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 388,
+          "cpu_time_ms": 384,
           "heap_bytes": 5231,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 200,
-          "wall_time_ms": 558,
+          "wall_time_ms": 565,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 403,
-          "heap_bytes": 5231,
+          "cpu_time_ms": 355,
+          "heap_bytes": 313,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 200,
-          "wall_time_ms": 608,
+          "wall_time_ms": 502,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 347,
-          "heap_bytes": 5231,
+          "cpu_time_ms": 382,
+          "heap_bytes": 313,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 200,
-          "wall_time_ms": 544,
+          "wall_time_ms": 540,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 373,
+          "cpu_time_ms": 416,
           "heap_bytes": 5231,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 200,
-          "wall_time_ms": 569,
+          "wall_time_ms": 584,
           "records_handled": 200
         }
       ]
@@ -140,64 +140,64 @@
       "module": "trigger-handler",
       "records": 2000,
       "median": {
-        "cpu_time_ms": 2756,
+        "cpu_time_ms": 2761,
         "heap_bytes": 48431,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 1,
         "dml_rows": 2000,
-        "wall_time_ms": 4415,
+        "wall_time_ms": 4416,
         "records_handled": 200
       },
       "runs": [
         {
-          "cpu_time_ms": 2678,
+          "cpu_time_ms": 2667,
+          "heap_bytes": 313,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 1,
+          "dml_rows": 2000,
+          "wall_time_ms": 4009,
+          "records_handled": 200
+        },
+        {
+          "cpu_time_ms": 2675,
+          "heap_bytes": 313,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 1,
+          "dml_rows": 2000,
+          "wall_time_ms": 4040,
+          "records_handled": 200
+        },
+        {
+          "cpu_time_ms": 3031,
           "heap_bytes": 48431,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 2000,
-          "wall_time_ms": 4415,
+          "wall_time_ms": 4416,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 3005,
-          "heap_bytes": -237417,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 1,
-          "dml_rows": 2000,
-          "wall_time_ms": 4658,
-          "records_handled": 200
-        },
-        {
-          "cpu_time_ms": 2756,
+          "cpu_time_ms": 3330,
           "heap_bytes": 48431,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 2000,
-          "wall_time_ms": 4262,
+          "wall_time_ms": 4764,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 2930,
+          "cpu_time_ms": 2761,
           "heap_bytes": 48431,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 1,
           "dml_rows": 2000,
-          "wall_time_ms": 4738,
-          "records_handled": 200
-        },
-        {
-          "cpu_time_ms": 2612,
-          "heap_bytes": 48431,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 1,
-          "dml_rows": 2000,
-          "wall_time_ms": 4161,
+          "wall_time_ms": 4498,
           "records_handled": 200
         }
       ]
@@ -206,64 +206,64 @@
       "module": "data-builder",
       "records": 1,
       "median": {
-        "cpu_time_ms": 61,
+        "cpu_time_ms": 53,
         "heap_bytes": 3754,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 2,
         "dml_rows": 2,
-        "wall_time_ms": 209,
+        "wall_time_ms": 119,
         "records_handled": 1
       },
       "runs": [
         {
-          "cpu_time_ms": 70,
-          "heap_bytes": 3806,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 2,
-          "dml_rows": 2,
-          "wall_time_ms": 473,
-          "records_handled": 1
-        },
-        {
-          "cpu_time_ms": 61,
+          "cpu_time_ms": 56,
           "heap_bytes": 3605,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2,
-          "wall_time_ms": 257,
+          "wall_time_ms": 285,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 49,
+          "cpu_time_ms": 53,
+          "heap_bytes": 3754,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 2,
+          "dml_rows": 2,
+          "wall_time_ms": 120,
+          "records_handled": 1
+        },
+        {
+          "cpu_time_ms": 51,
           "heap_bytes": 3605,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2,
-          "wall_time_ms": 165,
+          "wall_time_ms": 119,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 54,
+          "cpu_time_ms": 53,
           "heap_bytes": 3754,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2,
-          "wall_time_ms": 175,
+          "wall_time_ms": 101,
           "records_handled": 1
         },
         {
-          "cpu_time_ms": 65,
+          "cpu_time_ms": 52,
           "heap_bytes": 3754,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2,
-          "wall_time_ms": 209,
+          "wall_time_ms": 109,
           "records_handled": 1
         }
       ]
@@ -272,18 +272,18 @@
       "module": "data-builder",
       "records": 200,
       "median": {
-        "cpu_time_ms": 468,
+        "cpu_time_ms": 581,
         "heap_bytes": 28125,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 2,
         "dml_rows": 201,
-        "wall_time_ms": 833,
+        "wall_time_ms": 861,
         "records_handled": 200
       },
       "runs": [
         {
-          "cpu_time_ms": 463,
+          "cpu_time_ms": 580,
           "heap_bytes": 28125,
           "soql_queries": 0,
           "query_rows": 0,
@@ -293,43 +293,43 @@
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 537,
+          "cpu_time_ms": 414,
           "heap_bytes": 3605,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 201,
-          "wall_time_ms": 915,
+          "wall_time_ms": 676,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 544,
+          "cpu_time_ms": 581,
           "heap_bytes": 28125,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 201,
-          "wall_time_ms": 914,
+          "wall_time_ms": 861,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 468,
+          "cpu_time_ms": 586,
           "heap_bytes": 28125,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 201,
-          "wall_time_ms": 833,
+          "wall_time_ms": 970,
           "records_handled": 200
         },
         {
-          "cpu_time_ms": 461,
+          "cpu_time_ms": 651,
           "heap_bytes": 28125,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 201,
-          "wall_time_ms": 818,
+          "wall_time_ms": 937,
           "records_handled": 200
         }
       ]
@@ -338,64 +338,64 @@
       "module": "data-builder",
       "records": 2000,
       "median": {
-        "cpu_time_ms": 4697,
+        "cpu_time_ms": 4776,
         "heap_bytes": 250526,
         "soql_queries": 0,
         "query_rows": 0,
         "dml_statements": 2,
         "dml_rows": 2001,
-        "wall_time_ms": 9302,
+        "wall_time_ms": 8663,
         "records_handled": 2000
       },
       "runs": [
         {
-          "cpu_time_ms": 5161,
-          "heap_bytes": 250526,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 2,
-          "dml_rows": 2001,
-          "wall_time_ms": 9458,
-          "records_handled": 2000
-        },
-        {
-          "cpu_time_ms": 4525,
+          "cpu_time_ms": 5231,
           "heap_bytes": 3605,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2001,
-          "wall_time_ms": 8988,
+          "wall_time_ms": 9073,
           "records_handled": 2000
         },
         {
-          "cpu_time_ms": 5204,
+          "cpu_time_ms": 4759,
           "heap_bytes": 250526,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2001,
-          "wall_time_ms": 9438,
+          "wall_time_ms": 8128,
           "records_handled": 2000
         },
         {
-          "cpu_time_ms": 4697,
-          "heap_bytes": 250578,
-          "soql_queries": 0,
-          "query_rows": 0,
-          "dml_statements": 2,
-          "dml_rows": 2001,
-          "wall_time_ms": 9302,
-          "records_handled": 2000
-        },
-        {
-          "cpu_time_ms": 4626,
+          "cpu_time_ms": 5120,
           "heap_bytes": 250526,
           "soql_queries": 0,
           "query_rows": 0,
           "dml_statements": 2,
           "dml_rows": 2001,
-          "wall_time_ms": 8654,
+          "wall_time_ms": 8683,
+          "records_handled": 2000
+        },
+        {
+          "cpu_time_ms": 4734,
+          "heap_bytes": 3605,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 2,
+          "dml_rows": 2001,
+          "wall_time_ms": 8108,
+          "records_handled": 2000
+        },
+        {
+          "cpu_time_ms": 4776,
+          "heap_bytes": 250526,
+          "soql_queries": 0,
+          "query_rows": 0,
+          "dml_statements": 2,
+          "dml_rows": 2001,
+          "wall_time_ms": 8663,
           "records_handled": 2000
         }
       ]
