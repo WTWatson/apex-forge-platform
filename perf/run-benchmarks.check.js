@@ -130,8 +130,13 @@ test("a baseline from this org at the last published commit is used", () => {
   assert.equal(checkedSameOrgBaseline(PUBLISHED, ORG_ID, PUBLISHED), PUBLISHED);
 });
 
-/** A test-class benchmark's report for one size, whose two jobs had used the given CPU time by the end of the second. */
-function jobReport(records, jobHeapBytes, cpuAfterSecondJobMs) {
+/** A test-class benchmark's report for one size, whose two jobs had used the given CPU time by the end of the second, and whose second job saved the given rows. */
+function jobReport(
+  records,
+  jobHeapBytes,
+  cpuAfterSecondJobMs,
+  secondJobDmlRows,
+) {
   return {
     records,
     recordsHandled: records,
@@ -152,6 +157,7 @@ function jobReport(records, jobHeapBytes, cpuAfterSecondJobMs) {
         soqlQueries: 1,
         queryRows: 1,
         dmlStatements: 1,
+        dmlRows: 100,
         callouts: 1,
       },
       {
@@ -160,6 +166,7 @@ function jobReport(records, jobHeapBytes, cpuAfterSecondJobMs) {
         soqlQueries: 1,
         queryRows: 1,
         dmlStatements: 1,
+        dmlRows: secondJobDmlRows,
         callouts: 1,
       },
     ],
@@ -174,9 +181,16 @@ function jobReport(records, jobHeapBytes, cpuAfterSecondJobMs) {
 }
 
 /** A forge-http scenario from five identical test runs. */
-function jobScenario(records, jobHeapBytes, cpuAfterSecondJobMs = 250) {
+function jobScenario(
+  records,
+  jobHeapBytes,
+  cpuAfterSecondJobMs = 250,
+  secondJobDmlRows = 100,
+) {
   const runs = Array.from({ length: 5 }, () =>
-    publishedRun(jobReport(records, jobHeapBytes, cpuAfterSecondJobMs)),
+    publishedRun(
+      jobReport(records, jobHeapBytes, cpuAfterSecondJobMs, secondJobDmlRows),
+    ),
   );
   return summarize("forge-http", records, runs);
 }
@@ -240,4 +254,26 @@ test("the heap read in a job's trigger is kept but not checked", () => {
     THRESHOLDS,
   );
   assert.deepEqual(comparison.regressions, []);
+});
+
+test("a job's DML rows alone over their threshold are a regression", () => {
+  const candidate = jobCandidate(
+    jobScenario(200, 4000),
+    jobScenario(200, 4000, 250, 150),
+  );
+  const comparison = compareWithBaseline(
+    candidate,
+    [PUBLISHED_JOBS],
+    THRESHOLDS,
+  );
+  assert.deepEqual(comparison.regressions, [
+    "forge-http 200: job_dml_rows +50%",
+  ]);
+});
+
+test("each job's reading is kept in the runs but not summarized", () => {
+  const entry = jobScenario(200, 4000);
+  assert.equal(entry.runs[0].job_readings.length, 2);
+  assert.equal(entry.median.job_readings, undefined);
+  assert.equal(entry.median.job_dml_rows, 100);
 });

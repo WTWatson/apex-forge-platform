@@ -82,6 +82,7 @@ const COUNT_MEASURES = [
   "job_soql_queries",
   "job_query_rows",
   "job_dml_statements",
+  "job_dml_rows",
 ];
 // A job's heap is not gated: the only reading is taken in a trigger the job's save
 // fires, and a trigger's heap leaves out what the job holds around the save.
@@ -146,11 +147,13 @@ function publishedRun(raw) {
 }
 
 /**
- * The queued jobs' cost, and the cost of a job's every-readable-field query against
- * reading only the fields the job uses. In a test, Test.stopTest runs every job in one
- * context where CPU time keeps adding up, so each job's CPU time is its reading less
- * the reading of the job before it. Per-job measures keep the largest job, the one
- * closest to a limit.
+ * The queued jobs' cost up to each job's save, and the cost of a job's
+ * every-readable-field query against reading only the fields the job uses. Each job is
+ * read in the Account trigger its save fires, so the readings leave out what the job
+ * does after the save. In a test, Test.stopTest runs every job in one context where CPU
+ * time keeps adding up, so each job's CPU time is its reading less the reading of the
+ * job before it; each run keeps every job's reading under job_readings so this can be
+ * checked. Per-job measures keep the largest job, the one closest to a limit.
  */
 function jobMeasures(raw) {
   const jobs = raw.jobs;
@@ -170,6 +173,8 @@ function jobMeasures(raw) {
     job_soql_queries: largest("soqlQueries"),
     job_query_rows: largest("queryRows"),
     job_dml_statements: largest("dmlStatements"),
+    job_dml_rows: largest("dmlRows"),
+    job_readings: jobs,
     readable_fields: query.fields,
     field_query_cpu_time_ms: query.cpuTimeMs,
     field_query_heap_bytes: query.heapBytes,
@@ -302,6 +307,9 @@ function summarize(module, records, runs) {
   const medianRun = {};
   const largestRun = {};
   for (const measure of Object.keys(runs[0])) {
+    if (measure === "job_readings") {
+      continue; // each job's reading, kept in the runs only
+    }
     const values = runs.map((run) => run[measure]);
     if (isLargestRunMeasure(measure)) {
       largestRun[measure] = Math.max(...values);
@@ -666,23 +674,25 @@ function printJobTables(entries) {
     return;
   }
   console.log(
-    "\n| Records | Callouts in save | Jobs queued | Jobs run | Callouts per job | Job CPU ms | Job SOQL | Job query rows | Job DML | Failures |",
+    "\n| Records | Callouts in save | Jobs queued | Jobs run | Callouts per job | Job CPU ms | Job SOQL | Job query rows | Job DML | Job DML rows | Failures |",
   );
-  console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  console.log(
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  );
   for (const entry of entries) {
     const m = kept(entry);
     console.log(
-      `| ${entry.records} | ${m.callouts} | ${m.jobs_queued} | ${m.jobs_run} | ${m.job_callouts} | ${m.job_cpu_time_ms} | ${m.job_soql_queries} | ${m.job_query_rows} | ${m.job_dml_statements} | ${m.failures} |`,
+      `| ${entry.records} | ${m.callouts} | ${m.jobs_queued} | ${m.jobs_run} | ${m.job_callouts} | ${m.job_cpu_time_ms} | ${m.job_soql_queries} | ${m.job_query_rows} | ${m.job_dml_statements} | ${m.job_dml_rows} | ${m.failures} |`,
     );
   }
   console.log(
-    "\n| Records read by one job | Readable fields | Every-field query CPU ms | Heap | Only-used-fields query CPU ms | Heap |",
+    "\n| Records saved | Records read by one job | Readable fields | Every-field query CPU ms | Every-field query heap | Only-used-fields query CPU ms | Only-used-fields query heap |",
   );
-  console.log("| --- | --- | --- | --- | --- | --- |");
+  console.log("| --- | --- | --- | --- | --- | --- | --- |");
   for (const entry of entries) {
     const m = kept(entry);
     console.log(
-      `| ${Math.min(entry.records, 200)} | ${m.readable_fields} | ${m.field_query_cpu_time_ms} | ${m.field_query_heap_bytes} | ${m.used_fields_query_cpu_time_ms} | ${m.used_fields_query_heap_bytes} |`,
+      `| ${entry.records} | ${Math.min(entry.records, 200)} | ${m.readable_fields} | ${m.field_query_cpu_time_ms} | ${m.field_query_heap_bytes} | ${m.used_fields_query_cpu_time_ms} | ${m.used_fields_query_heap_bytes} |`,
     );
   }
 }
