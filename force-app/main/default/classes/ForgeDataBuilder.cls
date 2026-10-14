@@ -32,7 +32,7 @@ public with sharing class ForgeDataBuilder {
     /** Tells whether the field is a field of the given object type. */
     public static Boolean fieldBelongsTo(SObjectType objectType, SObjectField field)
     {
-        return fieldsOf(objectType).get(String.valueOf(field)) == field;
+        return field != null && fieldsOf(objectType).get(String.valueOf(field)) == field;
     }
 
     private static final Map<SObjectType, Map<String, SObjectField>> FIELDS_BY_OBJECT =
