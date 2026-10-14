@@ -20,6 +20,11 @@ would, at 1, 200 and 2,000 records. The published numbers are in
   where it keeps the largest run; `docs/performance/README.md` says why. It writes
   the five runs and the kept values to
   `docs/performance/results/<date>-<commit>.json` and prints the README rows.
+- A module that works only inside a test, such as `forge-http` with its HTTP mock
+  and Account test trigger, is benchmarked by a test class instead: one test run
+  measures every size, and the runner reads each size's numbers from the debug
+  log the run leaves. Before the first test run it traces the org's user at the
+  `ForgeBenchmark` debug level, which it creates if the org has none.
 - A scenario where any run handled fewer records than it was given is not
   published or compared. Its runs stay in the results file, marked
   `"complete": false`.
@@ -37,7 +42,11 @@ versions run in the same org, one after the other:
    `node perf/run-benchmarks.js --org <org> --baseline`. This measures the old
    code and keeps it in `perf/.same-org/<org Id>.json`, which is not committed.
    The runner reads the org's Id with `sf org display`, so any alias of the same
-   org finds that file, and an alias that now names another org does not.
+   org finds that file, and an alias that now names another org does not. It
+   measures only the modules the last published run has: remove the benchmark
+   class of any newer module from the copy, since its module is not in the old
+   `force-app`. A module published for the first time is marked "First published
+   run" in step 2, with nothing to compare against.
 2. Deploy the change's `force-app` to the same org and run
    `node perf/run-benchmarks.js --org <org>`. It refuses to start if step 1 is
    missing, was run in another org or was run on another commit. It compares
@@ -59,19 +68,23 @@ sf org create scratch -f config/project-scratch-def.json --target-dev-hub <dev-h
 
 # Step 1: the last published commit, from a copy outside the worktree. Deploy it
 # from inside the copy: sf's source tracking breaks on paths outside the project.
-mkdir -p <dir> && git archive <last-published-commit> force-app sfdx-project.json | tar -x -C <dir>
+# The copy needs every folder its sfdx-project.json lists, test-support included.
+# Add --ignore-conflicts when the org already has newer versions of these files.
+mkdir -p <dir> && git archive <last-published-commit> force-app test-support sfdx-project.json | tar -x -C <dir>
 cp -r perf/benchmarks <dir>/
+rm <dir>/benchmarks/classes/<NewModule>Benchmark.cls*   # each module newer than that commit
 cd <dir>
 sf project deploy start -o <org> --source-dir force-app --source-dir benchmarks
 cd -
 node perf/run-benchmarks.js --org <org> --baseline
 
 # Step 2: the change, over the files step 1 deployed
-sf project deploy start -o <org> --source-dir force-app --source-dir perf/benchmarks --ignore-conflicts
+sf project deploy start -o <org> --source-dir force-app --source-dir test-support --source-dir perf/benchmarks --ignore-conflicts
 node perf/run-benchmarks.js --org <org>
 
 sf org delete scratch -o <org> --no-prompt
 ```
 
-The trigger handler scenario puts a trigger on Lead, so deploy `perf/benchmarks`
-only to a scratch org made for benchmarking.
+The trigger handler scenario puts a trigger on Lead and `test-support` puts one on
+Account, so deploy `perf/benchmarks` and `test-support` only to a scratch org made
+for benchmarking.

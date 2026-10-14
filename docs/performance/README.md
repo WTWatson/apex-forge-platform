@@ -76,24 +76,98 @@ are reported too.
 
 ## Trigger handler framework
 
-_Run: 2026-10-13, 1575720, API 66.0_
+_Run: 2026-10-14, f44dffa, API 66.0_
 
-| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 21     | 487   | 0    | 0          | 1   | 1        | 99      | within thresholds   |
-| 200     | 427    | 5263  | 0    | 0          | 1   | 200      | 635     | within thresholds   |
-| 2000    | 4568   | 48463 | 0    | 0          | 1   | 2000     | 6699    | First published run |
+| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
+| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ----------------- |
+| 1       | 20     | 487   | 0    | 0          | 1   | 1        | 91      | within thresholds |
+| 200     | 376    | 5263  | 0    | 0          | 1   | 200      | 574     | within thresholds |
+| 2000    | 3550   | 48463 | 0    | 0          | 1   | 2000     | 5003    | within thresholds |
 
 Consumer lines: 15 (with the platform) / 21 (plain Apex)
 
 ## Data builder and seeder
 
-_Run: 2026-10-13, 1575720, API 66.0_
+_Run: 2026-10-14, f44dffa, API 66.0_
 
 | Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
 | ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ----------------- |
-| 1       | 61     | 3770   | 0    | 0          | 2   | 2        | 206     | within thresholds |
-| 200     | 520    | 28141  | 0    | 0          | 2   | 201      | 1110    | within thresholds |
-| 2000    | 5440   | 250554 | 0    | 0          | 2   | 2001     | 10410   | within thresholds |
+| 1       | 64     | 3926   | 0    | 0          | 2   | 2        | 183     | within thresholds |
+| 200     | 505    | 28297  | 0    | 0          | 2   | 201      | 848     | within thresholds |
+| 2000    | 4738   | 250646 | 0    | 0          | 2   | 2001     | 8492    | within thresholds |
 
 Consumer lines: 13 (with the platform) / 31 (plain Apex)
+
+## ForgeHttp
+
+_Run: 2026-10-14, f44dffa, API 66.0_
+
+The scenario: a sales user inserts Accounts, the Account trigger's handler sends
+them to an ERP through ForgeHttp, and a mock answers for the ERP. The save queues
+the sending as background jobs (queueables), which make the callouts, so the cost
+is in two places: the save itself, and the jobs it queues.
+
+This is the first published run of ForgeHttp, so every row reads "First published
+run": there is no earlier version to compare it with. The next change to ForgeHttp
+is compared with these numbers.
+
+The save, measured like the other modules:
+
+| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
+| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ------------------- |
+| 1       | 24     | 1059  | 0    | 0          | 1   | 1        | 160     | First published run |
+| 200     | 317    | 5835  | 0    | 0          | 1   | 200      | 578     | First published run |
+| 2000    | 3158   | 49035 | 0    | 0          | 1   | 2000     | 5070    | First published run |
+
+The jobs the save queues. Each job runs in its own transaction, with its own
+limits. The job columns are read when the job saves the Accounts it sent, in the
+Account trigger that save fires, and show the most any one job had used by then.
+They leave out what a job does after that save: its after-calls step, with the
+savepoint that step opens even when it has nothing to do (one more DML statement),
+queueing the next job when there are more records to send, and saving any
+integration failures. A job's real totals are higher than these columns, and the
+check below covers each job only up to its save.
+
+| Records | Callouts in save | Jobs queued | Jobs run | Callouts per job | Job CPU ms | Job SOQL | Job query rows | Job DML | Job DML rows | Failures |
+| ------- | ---------------- | ----------- | -------- | ---------------- | ---------- | -------- | -------------- | ------- | ------------ | -------- |
+| 1       | 0                | 1           | 1        | 1                | 34         | 1        | 1              | 1       | 1            | 0        |
+| 200     | 0                | 1           | 1        | 4                | 478        | 1        | 200            | 1       | 200          | 0        |
+| 2000    | 0                | 10          | 10       | 4                | 546        | 1        | 200            | 1       | 200          | 0        |
+
+| Column                   | What it means                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| Callouts in save         | Callouts made in the save's own transaction. A trigger cannot call out, so it should be 0. |
+| Jobs queued, Jobs run    | Background jobs the save queued, and how many of them ran.                                 |
+| Callouts per job         | The most callouts one job made. The limit is 100.                                          |
+| Job CPU ms               | The most CPU time one job used. The limit for a background job is 60,000.                  |
+| Job SOQL, Job query rows | The most queries and query rows one job used.                                              |
+| Job DML, Job DML rows    | The most DML statements and DML rows one job used.                                         |
+| Failures                 | Integration failures the jobs logged (`Integration_Failure__c` records).                   |
+
+Every job column but Jobs run and Failures is checked against the thresholds like
+the save's, up to each job's save: callouts in the save, jobs queued, and each
+job's callouts, CPU time, queries, query rows, DML statements and DML rows. The
+field-query table below is published but not checked.
+
+A job's heap is not shown or checked: the only place the benchmark can read it is
+the Account trigger the job's own update fires, and a reading there leaves out
+what the job holds around that update. A test that read heap both in the job and in
+that trigger found about 91 KB in the job and 13 KB in the trigger. The trigger
+reading is kept in the results file as `job_trigger_heap_bytes`, under a name that
+says where it was taken. Each run in the results file also keeps every job's own
+reading under `job_readings`. The test context runs the jobs one after another in
+one transaction, so their CPU readings add up. Job CPU ms is each reading less the
+one before, and `job_readings` lets anyone check that.
+
+Each job reads the Accounts it sends back with a query of every readable Account
+field. This table shows what that query costs against one of only the fields the
+job uses. Each job reads at most 200 records, so when 2,000 are saved one job
+still reads 200, and that row is a second sample at 200 records read.
+
+| Records saved | Records read by one job | Readable fields | Every-field query CPU ms | Every-field query heap | Only-used-fields query CPU ms | Only-used-fields query heap |
+| ------------- | ----------------------- | --------------- | ------------------------ | ---------------------- | ----------------------------- | --------------------------- |
+| 1             | 1                       | 58              | 11                       | 400                    | 4                             | 91                          |
+| 200           | 200                     | 58              | 23                       | 76474                  | 6                             | 16266                       |
+| 2000          | 200                     | 58              | 23                       | 66874                  | 7                             | 16266                       |
+
+Consumer lines: 89 (with the platform) / 210 (plain Apex)
