@@ -140,7 +140,7 @@ public with sharing class ForgeDataBuilder {
             List<Schema.DescribeFieldResult> toFill = autoFillOn
                 ? requiredFieldsToFill() : new List<Schema.DescribeFieldResult>();
             Map<SObjectField, Object> sameForEveryRecord = valuesSameForEveryRecord(toFill);
-            List<Schema.DescribeFieldResult> variesByRecord = fieldsThatVaryByRecord(toFill);
+            List<Schema.DescribeFieldResult> fieldsThatVary = fieldsThatVaryByRecord(toFill);
             for (Integer i = 0; i < howMany; i++) {
                 SObject rec = sObjType.newSObject();
                 for (SObjectField f : fieldValues.keySet()) {
@@ -153,7 +153,7 @@ public with sharing class ForgeDataBuilder {
                 for (SObjectField f : sameForEveryRecord.keySet()) {
                     rec.put(f, sameForEveryRecord.get(f));
                 }
-                for (Schema.DescribeFieldResult dfr : variesByRecord) {
+                for (Schema.DescribeFieldResult dfr : fieldsThatVary) {
                     rec.put(dfr.getSObjectField(), defaultFor(dfr, dfr.getType(), i));
                 }
                 out.add(rec);
