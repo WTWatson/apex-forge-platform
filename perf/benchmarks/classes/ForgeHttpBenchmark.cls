@@ -8,6 +8,8 @@
 private class ForgeHttpBenchmark
 {
     private static final List<Map<String, Object>> jobCosts = new List<Map<String, Object>>();
+    // The heap the readings themselves hold, so a trigger heap reading leaves out the earlier jobs' readings.
+    private static Integer readingBytes = 0;
 
     @IsTest
     static void oneAccount()
@@ -27,17 +29,18 @@ private class ForgeHttpBenchmark
         report(2000);
     }
 
-    /** Records what a job has spent by the time its save runs the Account trigger, the last work a job without failures does. */
+    /** Records what a job has spent by the time its save runs the Account trigger, the last work a job without failures does; the heap read here leaves out what the job holds around the save. */
     private class JobCostRecorded extends ForgeTriggerHandler
     {
         protected override void onTrigger(ForgeTriggerContext ctx)
         {
             if (ctx.operationType == System.TriggerOperation.AFTER_UPDATE)
             {
+                Integer heapBeforeReading = Limits.getHeapSize();
                 jobCosts.add(new Map<String, Object>{
                     'cpuTimeMs' => Limits.getCpuTime(),
                     'cpuLimitMs' => Limits.getLimitCpuTime(),
-                    'heapBytes' => Limits.getHeapSize(),
+                    'heapBytes' => heapBeforeReading - readingBytes,
                     'soqlQueries' => Limits.getQueries(),
                     'queryRows' => Limits.getQueryRows(),
                     'dmlStatements' => Limits.getDmlStatements(),
@@ -45,6 +48,7 @@ private class ForgeHttpBenchmark
                     'callouts' => Limits.getCallouts(),
                     'records' => ctx.newRecords.size()
                 });
+                readingBytes += Limits.getHeapSize() - heapBeforeReading;
             }
         }
     }
