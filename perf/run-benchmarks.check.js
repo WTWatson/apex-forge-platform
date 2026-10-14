@@ -80,14 +80,14 @@ test("a slow candidate against an incomplete baseline is not compared and fails"
   const candidate = slowCandidate([scenario(1, 100, 0), scenario(200, 400)]);
   const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
   assert.deepEqual(comparison.uncompared, ["trigger-handler 1"]);
-  assert.equal(exitCodeFor(comparison, false), EXIT_UNCOMPARED);
+  assert.equal(exitCodeFor(comparison, { isRebuild: false }), EXIT_UNCOMPARED);
 });
 
 test("a size missing from the baseline is not compared and fails", () => {
   const candidate = slowCandidate([scenario(1, 100)]);
   const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
   assert.deepEqual(comparison.uncompared, ["trigger-handler 200"]);
-  assert.equal(exitCodeFor(comparison, false), EXIT_UNCOMPARED);
+  assert.equal(exitCodeFor(comparison, { isRebuild: false }), EXIT_UNCOMPARED);
 });
 
 test("a slow candidate against a complete baseline is a regression", () => {
@@ -95,20 +95,20 @@ test("a slow candidate against a complete baseline is a regression", () => {
   const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
   assert.deepEqual(comparison.uncompared, []);
   assert.equal(comparison.regressions.length, 2);
-  assert.equal(exitCodeFor(comparison, false), EXIT_REGRESSION);
+  assert.equal(exitCodeFor(comparison, { isRebuild: false }), EXIT_REGRESSION);
 });
 
 test("a candidate within thresholds passes", () => {
   const candidate = slowCandidate([scenario(1, 190), scenario(200, 780)]);
   const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
-  assert.equal(exitCodeFor(comparison, false), 0);
+  assert.equal(exitCodeFor(comparison, { isRebuild: false }), 0);
 });
 
 test("a rebuild only reports, even when a size is not compared", () => {
   const candidate = slowCandidate([]);
   const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
   assert.equal(comparison.uncompared.length, 2);
-  assert.equal(exitCodeFor(comparison, true), 0);
+  assert.equal(exitCodeFor(comparison, { isRebuild: true }), 0);
 });
 
 test("a baseline from another org is refused", () => {

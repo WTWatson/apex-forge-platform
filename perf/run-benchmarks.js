@@ -21,8 +21,8 @@
  * a results file, and rewrites it. It only reports, and never fails on a comparison.
  *
  * Exit codes: 2 when a measure is worse than its threshold; 3 when a size published
- * before could not be compared, because the same-org re-run did not handle every
- * record. On 3 nothing is written to docs/performance/results.
+ * before could not be compared, because the same-org re-run did not measure it or did
+ * not handle every record of it. On 3 nothing is written to docs/performance/results.
  */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -465,9 +465,9 @@ function compareWithBaseline(run, earlier, thresholds) {
   return { changes, regressions, uncompared };
 }
 
-/** The exit code of a run: a size that could not be compared fails first, because then nothing is published. */
-function exitCodeFor(comparison, rebuild) {
-  if (rebuild) {
+/** The exit code of a run: a size that could not be compared fails first, because then nothing is published; a rebuild only reports, so it always exits 0. */
+function exitCodeFor(comparison, { isRebuild }) {
+  if (isRebuild) {
     return 0;
   }
   if (comparison.uncompared.length) {
@@ -745,7 +745,7 @@ function report(run, comparison, withheld) {
   printWarnings(run.results);
   if (comparison.uncompared.length) {
     console.log(
-      `\nNot compared, because the same-org re-run did not handle every record; run --baseline again:\n- ${comparison.uncompared.join("\n- ")}`,
+      `\nNot compared, because the same-org re-run did not measure the size or did not handle every record of it; run --baseline again:\n- ${comparison.uncompared.join("\n- ")}`,
     );
   }
   if (comparison.regressions.length) {
@@ -800,7 +800,7 @@ function main() {
     rebuild ? path.basename(rebuild) : undefined,
   );
   const comparison = compareWithBaseline(run, earlier, thresholds);
-  process.exitCode = exitCodeFor(comparison, rebuild);
+  process.exitCode = exitCodeFor(comparison, { isRebuild: Boolean(rebuild) });
   report(run, comparison, process.exitCode === EXIT_UNCOMPARED);
 }
 
