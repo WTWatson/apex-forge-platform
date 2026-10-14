@@ -109,10 +109,10 @@ any user-mode test does. The platform adds no test setup of its own.
   `LastModifiedDate`, `LastModifiedById`, `SystemModstamp`), formula and roll-up
   fields, and auto-numbers. A record read from the database carries them, and the
   user did not set them. The build proves each kind in an org. Every other field
-  is written, and user-mode DML decides whether the user may: a field whose access
+  goes through the check above and is written in user mode: a field whose access
   cannot be set in a permission set but that the user may still write, such as a
   required field, is not dropped. A field that can be set on create but not on
-  update is refused on update with the same error.
+  update is refused on update with the same "You cannot edit" error.
 - It writes a new record per input record, holding the Id and only the fields it
   decided to write, a cleared field included as null. So nothing the user did not
   mean to change reaches the DML. When the save succeeds, each new Id is set on
@@ -157,9 +157,9 @@ A validation rule, a locked record or any other DML error is raised as the
 `DmlException` Salesforce gives, after the rollback.
 
 The build's tests cover each kind of field above: a writable field whose access a
-permission set cannot change, an audit field, a formula and an auto-number, a
-field writable on create but not on update, and an ordinary field the user's
-permission sets deny.
+permission set cannot change, an audit field, a formula, a roll-up and an
+auto-number, a field writable on create but not on update, and an ordinary field
+the user's permission sets deny.
 
 ## How it will be measured
 
