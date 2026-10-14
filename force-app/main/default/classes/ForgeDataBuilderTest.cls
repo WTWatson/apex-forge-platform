@@ -382,4 +382,101 @@ private class ForgeDataBuilderTest {
         Assert.areEqual('Second', a.Name,
             'Later with() call should overwrite earlier value');
     }
+
+    @IsTest
+    static void fieldBelongsToTellsSameNamedFieldsApart()
+    {
+        Assert.isTrue(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Account.Name));
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Contact.Name),
+            'A field of the same name on another object does not belong');
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, Contact.LastName));
+    }
+
+    @IsTest
+    static void fieldBelongsToSaysNoForAMissingField()
+    {
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, null));
+    }
+
+    @IsTest
+    static void repeatedBuildsOfOneObjectEachFillWhatIsMissing()
+    {
+        Test.startTest();
+        Contact filled = (Contact) ForgeDataBuilder.of(Contact.SObjectType).build();
+        Contact named = (Contact) ForgeDataBuilder.of(Contact.SObjectType)
+            .with(Contact.LastName, 'Smith')
+            .build();
+        List<SObject> several = ForgeDataBuilder.of(Contact.SObjectType)
+            .count(2)
+            .buildList();
+        Test.stopTest();
+
+        Assert.areEqual('Test', filled.LastName);
+        Assert.areEqual('Smith', named.LastName,
+            'An explicit value on a later build should win over the remembered required field');
+        Assert.areEqual('LastName 2', ((Contact) several[1]).LastName);
+    }
+
+    @IsTest
+    static void eachUserGetsTheRequiredFieldsTheyCanCreate()
+    {
+        User noLeadAccess = userWithProfile('Minimum Access - Salesforce');
+        User salesUser = userWithProfile('Standard User');
+        Lead unfilled;
+        Lead filled;
+
+        Test.startTest();
+        System.runAs(noLeadAccess)
+        {
+            unfilled = (Lead) ForgeDataBuilder.of(Lead.SObjectType).build();
+        }
+        System.runAs(salesUser)
+        {
+            filled = (Lead) ForgeDataBuilder.of(Lead.SObjectType).build();
+        }
+        Test.stopTest();
+
+        Assert.isNull(unfilled.LastName,
+            'A user who cannot create leads has no lead fields to fill');
+        Assert.areEqual('Test', filled.LastName,
+            'A second user should not get the first user\'s remembered list');
+        Assert.areEqual('Test', filled.Company);
+    }
+
+    private static User userWithProfile(String profileName)
+    {
+        User u = new User(
+            ProfileId = [SELECT Id FROM Profile WHERE Name = :profileName].Id,
+            LastName = 'Builder',
+            Alias = 'builder',
+            Email = 'builder@forge.example.com',
+            Username = 'builder' + Crypto.getRandomInteger() + '@forge.example.com',
+            TimeZoneSidKey = 'Europe/London',
+            LocaleSidKey = 'en_GB',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+        insert u;
+        return u;
+    }
+
+    @IsTest
+    static void bulkAutoFillNamesEachRecordAndSharesTheStage()
+    {
+        Test.startTest();
+        List<SObject> opps = ForgeDataBuilder.of(Opportunity.SObjectType)
+            .count(200)
+            .buildList();
+        Test.stopTest();
+
+        Opportunity first = (Opportunity) opps[0];
+        Opportunity last = (Opportunity) opps[199];
+        Assert.areEqual(200, opps.size());
+        Assert.areEqual('Name 1', first.Name);
+        Assert.areEqual('Name 200', last.Name);
+        Assert.isNotNull(first.StageName);
+        Assert.areEqual(first.StageName, last.StageName,
+            'Every record should get the same first active stage');
+        Assert.areEqual(Date.today(), last.CloseDate);
+    }
 }
