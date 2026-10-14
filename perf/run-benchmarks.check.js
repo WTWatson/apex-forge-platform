@@ -11,6 +11,8 @@ const {
   exitCodeFor,
   EXIT_REGRESSION,
   EXIT_UNCOMPARED,
+  publishedRun,
+  summarize,
 } = require("./run-benchmarks");
 
 const THRESHOLDS = {
@@ -126,4 +128,116 @@ test("a baseline that recorded no org is refused", () => {
 
 test("a baseline from this org at the last published commit is used", () => {
   assert.equal(checkedSameOrgBaseline(PUBLISHED, ORG_ID, PUBLISHED), PUBLISHED);
+});
+
+/** A test-class benchmark's report for one size, whose two jobs had used the given CPU time by the end of the second. */
+function jobReport(records, jobHeapBytes, cpuAfterSecondJobMs) {
+  return {
+    records,
+    recordsHandled: records,
+    cpuTimeMs: 20,
+    heapBytes: 1000,
+    soqlQueries: 1,
+    queryRows: records,
+    dmlStatements: 1,
+    dmlRows: records,
+    wallTimeMs: 40,
+    callouts: 0,
+    jobsQueued: 2,
+    failures: 0,
+    jobs: [
+      {
+        cpuTimeMs: 100,
+        heapBytes: jobHeapBytes,
+        soqlQueries: 1,
+        queryRows: 1,
+        dmlStatements: 1,
+        callouts: 1,
+      },
+      {
+        cpuTimeMs: cpuAfterSecondJobMs,
+        heapBytes: 500,
+        soqlQueries: 1,
+        queryRows: 1,
+        dmlStatements: 1,
+        callouts: 1,
+      },
+    ],
+    readableFieldsQuery: {
+      fields: 58,
+      cpuTimeMs: 5,
+      heapBytes: 9000,
+      narrowCpuTimeMs: 1,
+      narrowHeapBytes: 2000,
+    },
+  };
+}
+
+/** A forge-http scenario from five identical test runs. */
+function jobScenario(records, jobHeapBytes, cpuAfterSecondJobMs = 250) {
+  const runs = Array.from({ length: 5 }, () =>
+    publishedRun(jobReport(records, jobHeapBytes, cpuAfterSecondJobMs)),
+  );
+  return summarize("forge-http", records, runs);
+}
+
+/** A forge-http candidate and its same-org baseline, each with one 200-record scenario. */
+function jobCandidate(baselineScenario, candidateScenario) {
+  const candidate = results("bbbbbbb", "2026-10-13T10:00:00Z", [
+    candidateScenario,
+  ]);
+  candidate.same_org_baseline = results("aaaaaaa", "2026-10-13T09:00:00Z", [
+    baselineScenario,
+  ]);
+  return candidate;
+}
+
+const PUBLISHED_JOBS = results("aaaaaaa", "2026-10-01T10:00:00Z", [
+  jobScenario(200, 4000),
+]);
+
+test("a job's CPU time is its reading less the job's before it, and its trigger heap keeps the largest run", () => {
+  const entry = jobScenario(200, 4000);
+  assert.equal(entry.median.job_cpu_time_ms, 150);
+  assert.equal(entry.largest.job_trigger_heap_bytes, 4000);
+  assert.equal(entry.median.jobs_run, 2);
+});
+
+test("a module published for the first time is not compared and does not fail", () => {
+  const candidate = slowCandidate([scenario(1, 100), scenario(200, 400)]);
+  candidate.results.push(jobScenario(200, 4000));
+  const comparison = compareWithBaseline(candidate, [PUBLISHED], THRESHOLDS);
+  assert.equal(
+    comparison.changes.get(candidate.results.at(-1)),
+    "First published run",
+  );
+  assert.deepEqual(comparison.uncompared, []);
+});
+
+test("a job's CPU time over its threshold is a regression", () => {
+  const candidate = jobCandidate(
+    jobScenario(200, 4000),
+    jobScenario(200, 4000, 400),
+  );
+  const comparison = compareWithBaseline(
+    candidate,
+    [PUBLISHED_JOBS],
+    THRESHOLDS,
+  );
+  assert.deepEqual(comparison.regressions, [
+    "forge-http 200: job_cpu_time_ms +100%",
+  ]);
+});
+
+test("the heap read in a job's trigger is kept but not checked", () => {
+  const candidate = jobCandidate(
+    jobScenario(200, 4000),
+    jobScenario(200, 8000),
+  );
+  const comparison = compareWithBaseline(
+    candidate,
+    [PUBLISHED_JOBS],
+    THRESHOLDS,
+  );
+  assert.deepEqual(comparison.regressions, []);
 });

@@ -11,8 +11,12 @@
  * measurement is two passes in one org: first deploy force-app at the last published
  * commit and run with --baseline, then deploy the change and run without it. Both
  * passes record the org's Id, and the second refuses a baseline from another org.
- * perf/benchmarks must be deployed too. Each run is one anonymous Apex transaction, so
- * every measurement starts with fresh limits.
+ * The --baseline pass measures only the modules the last published run has; a module
+ * published for the first time has nothing to compare with.
+ * perf/benchmarks and test-support must be deployed too. Each run is one anonymous Apex
+ * transaction, so every measurement starts with fresh limits. A module that runs only
+ * in a test (TEST_CLASS_MODULES) is one test run per run instead, with its numbers read
+ * from the debug log the runner turns on for the org's user.
  * --rebuild needs no org: it works the kept values out again from the runs already in
  * a results file, and rewrites it. It only reports, and never fails on a comparison.
  *
@@ -39,8 +43,12 @@ const DEFAULT_THRESHOLDS = {
   heap_min_bytes: 512,
 };
 
-const MODULES = ["trigger-handler", "data-builder"];
+const MODULES = ["trigger-handler", "data-builder", "forge-http"];
 const RECORD_COUNTS = [1, 200, 2000];
+// Modules whose scenario runs only in a test (it needs a mock or a test-only trigger):
+// one test run measures every size, and the numbers come back through the debug log.
+const TEST_CLASS_MODULES = { "forge-http": "ForgeHttpBenchmark" };
+const DEBUG_LEVEL = "ForgeBenchmark";
 
 // Apex field name -> published measure name.
 const MEASURES = {
@@ -57,15 +65,26 @@ const MEASURES = {
 // minus just before it. Records built before the call and memory freed during it are
 // not in it. The counter sometimes leaves out memory a run still holds and has not been
 // seen to over-count, so the largest run is kept, under "largest"; every other measure
-// is the median, under "median". All five runs can still read low.
-const LARGEST_RUN_MEASURES = ["heap_bytes"];
-const CPU_MEASURES = ["cpu_time_ms"];
+// is the median, under "median". All five runs can still read low. The same holds for
+// every heap measure of the queued jobs.
+const isLargestRunMeasure = (measure) => measure.endsWith("heap_bytes");
+// The job_ measures, and callouts and jobs_queued, exist only for modules that queue
+// jobs; a measure missing on either side of a comparison is skipped.
+const CPU_MEASURES = ["cpu_time_ms", "job_cpu_time_ms"];
 const COUNT_MEASURES = [
   "soql_queries",
   "query_rows",
   "dml_statements",
   "dml_rows",
+  "callouts",
+  "jobs_queued",
+  "job_callouts",
+  "job_soql_queries",
+  "job_query_rows",
+  "job_dml_statements",
 ];
+// A job's heap is not gated: the only reading is taken in a trigger the job's save
+// fires, and a trigger's heap leaves out what the job holds around the save.
 const HEAP_MEASURES = ["heap_bytes"];
 const NOT_PUBLISHED = "Not published yet";
 const EXIT_REGRESSION = 2;
@@ -108,14 +127,166 @@ function measureOnce(org, module, records) {
   const line = result.logs
     .split("\n")
     .find((logLine) => logLine.includes(REPORT_PREFIX));
-  const raw = JSON.parse(
+  return publishedRun(reportIn(line));
+}
+
+function reportIn(line) {
+  return JSON.parse(
     line.slice(line.indexOf(REPORT_PREFIX) + REPORT_PREFIX.length),
   );
+}
+
+/** Renames a benchmark's report to the published measures, adding the queued jobs' where there are any. */
+function publishedRun(raw) {
   const run = {};
   for (const [apexName, publishedName] of Object.entries(MEASURES)) {
     run[publishedName] = raw[apexName];
   }
-  return run;
+  return raw.jobs ? { ...run, ...jobMeasures(raw) } : run;
+}
+
+/**
+ * The queued jobs' cost, and the cost of a job's every-readable-field query against
+ * reading only the fields the job uses. In a test, Test.stopTest runs every job in one
+ * context where CPU time keeps adding up, so each job's CPU time is its reading less
+ * the reading of the job before it. Per-job measures keep the largest job, the one
+ * closest to a limit.
+ */
+function jobMeasures(raw) {
+  const jobs = raw.jobs;
+  const jobCpu = jobs.map(
+    (job, at) => job.cpuTimeMs - (at ? jobs[at - 1].cpuTimeMs : 0),
+  );
+  const largest = (field) => Math.max(...jobs.map((job) => job[field]));
+  const query = raw.readableFieldsQuery;
+  return {
+    callouts: raw.callouts,
+    jobs_queued: raw.jobsQueued,
+    jobs_run: jobs.length,
+    failures: raw.failures,
+    job_callouts: largest("callouts"),
+    job_cpu_time_ms: Math.max(...jobCpu),
+    job_trigger_heap_bytes: largest("heapBytes"),
+    job_soql_queries: largest("soqlQueries"),
+    job_query_rows: largest("queryRows"),
+    job_dml_statements: largest("dmlStatements"),
+    readable_fields: query.fields,
+    field_query_cpu_time_ms: query.cpuTimeMs,
+    field_query_heap_bytes: query.heapBytes,
+    used_fields_query_cpu_time_ms: query.narrowCpuTimeMs,
+    used_fields_query_heap_bytes: query.narrowHeapBytes,
+  };
+}
+
+function sfJson(args) {
+  return JSON.parse(
+    execFileSync("sf", [...args, "--json"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  ).result;
+}
+
+function toolingQuery(org, soql) {
+  return sfJson(["data", "query", "-o", org, "--use-tooling-api", "-q", soql])
+    .records;
+}
+
+function createToolingRecord(org, sobject, values) {
+  return sfJson([
+    "data",
+    "create",
+    "record",
+    "-o",
+    org,
+    "--use-tooling-api",
+    "--sobject",
+    sobject,
+    "--values",
+    values,
+  ]).id;
+}
+
+/** Makes sure the org's user is traced at a level that keeps the benchmark lines, so a test run leaves a log to read. */
+function traceTheRunningUser(org) {
+  const username = sfJson(["org", "display", "-o", org]).username;
+  const userId = sfJson([
+    "data",
+    "query",
+    "-o",
+    org,
+    "-q",
+    `SELECT Id FROM User WHERE Username = '${username}'`,
+  ]).records[0].Id;
+  const now = new Date();
+  const anHourFromNow = new Date(now.getTime() + 3600 * 1000).toISOString();
+  const traced = toolingQuery(
+    org,
+    `SELECT Id FROM TraceFlag WHERE TracedEntityId = '${userId}' AND DebugLevel.DeveloperName = '${DEBUG_LEVEL}' AND ExpirationDate > ${anHourFromNow}`,
+  );
+  if (traced.length) {
+    return;
+  }
+  const levels = toolingQuery(
+    org,
+    `SELECT Id FROM DebugLevel WHERE DeveloperName = '${DEBUG_LEVEL}'`,
+  );
+  const levelId = levels.length
+    ? levels[0].Id
+    : createToolingRecord(
+        org,
+        "DebugLevel",
+        `DeveloperName=${DEBUG_LEVEL} MasterLabel=${DEBUG_LEVEL} ApexCode=ERROR ApexProfiling=NONE Callout=NONE Database=NONE System=NONE Validation=NONE Visualforce=NONE Workflow=NONE`,
+      );
+  const expires = new Date(now.getTime() + 12 * 3600 * 1000).toISOString();
+  createToolingRecord(
+    org,
+    "TraceFlag",
+    `TracedEntityId=${userId} DebugLevelId=${levelId} LogType=USER_DEBUG StartDate=${now.toISOString()} ExpirationDate=${expires}`,
+  );
+}
+
+function logIds(org) {
+  return sfJson(["apex", "list", "log", "-o", org]).map((log) => log.Id);
+}
+
+/** Runs a module's benchmark test class once and returns one run per size, read from the logs that run left. */
+function measureTestRunOnce(org, testClass) {
+  const before = new Set(logIds(org));
+  const outcome = sfJson([
+    "apex",
+    "run",
+    "test",
+    "-o",
+    org,
+    "--tests",
+    testClass,
+    "--wait",
+    "60",
+  ]);
+  if (outcome.summary.outcome !== "Passed") {
+    const failed = outcome.tests
+      .filter((test) => test.Outcome !== "Pass")
+      .map((test) => `${test.MethodName}: ${test.Message}`);
+    throw new Error(`${testClass} failed:\n${failed.join("\n")}`);
+  }
+  const runsBySize = new Map();
+  for (const id of logIds(org).filter((each) => !before.has(each))) {
+    const [log] = sfJson(["apex", "get", "log", "-o", org, "--log-id", id]);
+    for (const line of (log.log ?? log).split("\n")) {
+      if (line.includes(REPORT_PREFIX)) {
+        const raw = reportIn(line);
+        runsBySize.set(raw.records, publishedRun(raw));
+      }
+    }
+  }
+  const missing = RECORD_COUNTS.filter((size) => !runsBySize.has(size));
+  if (missing.length) {
+    throw new Error(
+      `${testClass} passed but left no benchmark line for ${missing.join(", ")} records; is the org's user traced?`,
+    );
+  }
+  return runsBySize;
 }
 
 /** Whether every run of a scenario handled all its records; only then is it published or compared. */
@@ -130,9 +301,9 @@ function summarize(module, records, runs) {
   }
   const medianRun = {};
   const largestRun = {};
-  for (const measure of Object.values(MEASURES)) {
+  for (const measure of Object.keys(runs[0])) {
     const values = runs.map((run) => run[measure]);
-    if (LARGEST_RUN_MEASURES.includes(measure)) {
+    if (isLargestRunMeasure(measure)) {
       largestRun[measure] = Math.max(...values);
     } else {
       medianRun[measure] = median(values);
@@ -237,7 +408,7 @@ function changesAgainst(earlier, baseline, entry, thresholds) {
   ]) {
     const was = kept(before)[measure];
     const now = kept(entry)[measure];
-    if (was === now) {
+    if (was === now || was === undefined || now === undefined) {
       continue;
     }
     if (
@@ -315,13 +486,29 @@ function checkedOutCommit() {
 }
 
 /** Runs every scenario in the org and returns a new results file, with the time it was run and the org's Id. */
-function measureInOrg(org, id, runs, commit) {
+function measureInOrg(org, id, runs, commit, modules = MODULES) {
   const apiVersion = JSON.parse(
     fs.readFileSync(path.join(ROOT, "sfdx-project.json"), "utf8"),
   ).sourceApiVersion;
   const runAt = new Date().toISOString();
   const results = [];
-  for (const module of MODULES) {
+  if (modules.some((module) => TEST_CLASS_MODULES[module])) {
+    traceTheRunningUser(org);
+  }
+  for (const module of modules) {
+    const testClass = TEST_CLASS_MODULES[module];
+    if (testClass) {
+      const measured = [];
+      for (let run = 1; run <= runs; run++) {
+        process.stderr.write(`${module} (${testClass}) run ${run}/${runs}\n`);
+        measured.push(measureTestRunOnce(org, testClass));
+      }
+      for (const records of RECORD_COUNTS) {
+        const bySize = measured.map((runsBySize) => runsBySize.get(records));
+        results.push(summarize(module, records, bySize));
+      }
+      continue;
+    }
     for (const records of RECORD_COUNTS) {
       const measured = [];
       for (let run = 1; run <= runs; run++) {
@@ -332,7 +519,7 @@ function measureInOrg(org, id, runs, commit) {
     }
   }
   const lines = {};
-  for (const module of MODULES) {
+  for (const module of modules) {
     lines[module] = consumerLines(module);
   }
   return {
@@ -386,7 +573,17 @@ function measureSameOrgBaseline(org, runs, lastPublished) {
   process.stderr.write(
     `Measuring ${org} (${id}) as ${lastPublished.commit}, the last published commit.\n`,
   );
-  const rerun = measureInOrg(org, id, runs, lastPublished.commit);
+  // A module the last published run lacks is not in that commit's force-app either.
+  const publishedModules = MODULES.filter((module) =>
+    lastPublished.results.some((entry) => entry.module === module),
+  );
+  const rerun = measureInOrg(
+    org,
+    id,
+    runs,
+    lastPublished.commit,
+    publishedModules,
+  );
   fs.mkdirSync(SAME_ORG_DIR, { recursive: true });
   fs.writeFileSync(sameOrgFile(id), JSON.stringify(rerun, null, 2) + "\n");
   printTables(rerun, (entry) =>
@@ -430,7 +627,10 @@ function checkedSameOrgBaseline(baseline, id, lastPublished) {
 
 /** Prints each module's README table; changeFor returns the text of the Change column for one scenario. */
 function printTables(run, changeFor) {
-  for (const module of MODULES) {
+  const modules = MODULES.filter((module) =>
+    run.results.some((entry) => entry.module === module),
+  );
+  for (const module of modules) {
     console.log(
       `\n## ${module}\n\n_Run: ${run.date}, ${run.commit}, API ${run.api_version}_\n`,
     );
@@ -449,8 +649,40 @@ function printTables(run, changeFor) {
         `| ${entry.records} | ${m.cpu_time_ms} | ${m.heap_bytes} | ${m.soql_queries} | ${m.query_rows} | ${m.dml_statements} | ${m.dml_rows} | ${m.wall_time_ms} | ${change} |`,
       );
     }
+    printJobTables(
+      run.results.filter(
+        (each) => each.module === module && kept(each).jobs_run !== undefined,
+      ),
+    );
     console.log(
       `\nConsumer lines: ${run.consumer_lines[module].forge} (forge) / ${run.consumer_lines[module].plain} (plain)`,
+    );
+  }
+}
+
+/** Prints the queued jobs' table and the field-query table for a module whose save queues jobs. */
+function printJobTables(entries) {
+  if (!entries.length) {
+    return;
+  }
+  console.log(
+    "\n| Records | Callouts in save | Jobs queued | Jobs run | Callouts per job | Job CPU ms | Job SOQL | Job query rows | Job DML | Failures |",
+  );
+  console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const entry of entries) {
+    const m = kept(entry);
+    console.log(
+      `| ${entry.records} | ${m.callouts} | ${m.jobs_queued} | ${m.jobs_run} | ${m.job_callouts} | ${m.job_cpu_time_ms} | ${m.job_soql_queries} | ${m.job_query_rows} | ${m.job_dml_statements} | ${m.failures} |`,
+    );
+  }
+  console.log(
+    "\n| Records read by one job | Readable fields | Every-field query CPU ms | Heap | Only-used-fields query CPU ms | Heap |",
+  );
+  console.log("| --- | --- | --- | --- | --- | --- |");
+  for (const entry of entries) {
+    const m = kept(entry);
+    console.log(
+      `| ${Math.min(entry.records, 200)} | ${m.readable_fields} | ${m.field_query_cpu_time_ms} | ${m.field_query_heap_bytes} | ${m.used_fields_query_cpu_time_ms} | ${m.used_fields_query_heap_bytes} |`,
     );
   }
 }
@@ -572,4 +804,6 @@ module.exports = {
   exitCodeFor,
   EXIT_REGRESSION,
   EXIT_UNCOMPARED,
+  publishedRun,
+  summarize,
 };
