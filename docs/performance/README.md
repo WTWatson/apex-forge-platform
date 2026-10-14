@@ -40,8 +40,9 @@ side by side.
   measured, and the Change column compares the two. The results file keeps the
   previous version's numbers from that org under `same_org_baseline`.
 - A size that was published before is published again only if it was compared.
-  If the previous version's run in the same org did not handle every record, the
-  change's numbers are not published, and both versions are measured again.
+  If the previous version's run in the same org did not measure that size, or did
+  not handle every record of it, the change's numbers are not published, and both
+  versions are measured again.
 - Heap is the memory the measured call added: the heap just after the call minus
   the heap just before it. Records the benchmark builds before the call are not in
   it, and neither is memory the call uses and frees again.
