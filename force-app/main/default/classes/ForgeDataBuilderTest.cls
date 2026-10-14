@@ -302,6 +302,49 @@ private class ForgeDataBuilderTest {
     }
 
     @IsTest
+    static void eachUserGetsTheRequiredFieldsTheyCanCreate()
+    {
+        User noLeadAccess = userWithProfile('Minimum Access - Salesforce');
+        User salesUser = userWithProfile('Standard User');
+        Lead unfilled;
+        Lead filled;
+
+        Test.startTest();
+        System.runAs(noLeadAccess)
+        {
+            unfilled = (Lead) ForgeDataBuilder.of(Lead.SObjectType).build();
+        }
+        System.runAs(salesUser)
+        {
+            filled = (Lead) ForgeDataBuilder.of(Lead.SObjectType).build();
+        }
+        Test.stopTest();
+
+        Assert.isNull(unfilled.LastName,
+            'A user who cannot create leads has no lead fields to fill');
+        Assert.areEqual('Test', filled.LastName,
+            'A second user should not get the first user\'s remembered list');
+        Assert.areEqual('Test', filled.Company);
+    }
+
+    private static User userWithProfile(String profileName)
+    {
+        User u = new User(
+            ProfileId = [SELECT Id FROM Profile WHERE Name = :profileName].Id,
+            LastName = 'Builder',
+            Alias = 'builder',
+            Email = 'builder@forge.example.com',
+            Username = 'builder' + Crypto.getRandomInteger() + '@forge.example.com',
+            TimeZoneSidKey = 'Europe/London',
+            LocaleSidKey = 'en_GB',
+            EmailEncodingKey = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+        insert u;
+        return u;
+    }
+
+    @IsTest
     static void bulkAutoFillNamesEachRecordAndSharesTheStage()
     {
         Test.startTest();
