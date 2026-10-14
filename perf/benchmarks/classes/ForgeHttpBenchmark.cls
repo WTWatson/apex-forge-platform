@@ -29,7 +29,7 @@ private class ForgeHttpBenchmark
         report(2000);
     }
 
-    /** Records what a job has spent by the time its save runs the Account trigger, the last work a job without failures does; the heap read here leaves out what the job holds around the save. */
+    /** Records a job's counters at its save, in the Account trigger that save runs; they leave out the after-calls step and its savepoint, queueing the next job, saving failures, and the heap the job holds around the save. */
     private class JobCostRecorded extends ForgeTriggerHandler
     {
         protected override void onTrigger(ForgeTriggerContext ctx)
@@ -105,7 +105,7 @@ private class ForgeHttpBenchmark
         };
     }
 
-    /** What a job's read of every readable field costs against reading only the fields run uses, for one job's records. */
+    /** What a job's read of every readable field costs against reading only the fields the job's run method uses, for one job's records. */
     private static Map<String, Object> measureQueries(Set<Id> accountIds)
     {
         List<Id> ids = new List<Id>(accountIds);
