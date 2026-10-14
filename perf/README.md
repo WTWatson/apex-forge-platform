@@ -44,9 +44,9 @@ versions run in the same org, one after the other:
    every measure with step 1, writes the results file with step 1's numbers in it
    under `same_org_baseline`, and lists every measure over `thresholds.json`. If
    any is over, it exits with code 2.
-3. If step 1 did not handle every record of a size that was published before, the
-   change cannot be compared at that size. Then the runner writes no results file
-   and exits with code 3; run both steps again.
+3. If step 1 did not measure a size that was published before, or did not handle
+   every record of it, the change cannot be compared at that size. Then the runner
+   writes no results file and exits with code 3; run both steps again.
 
 `npm run test:perf` checks the comparison with canned results, with no org.
 
