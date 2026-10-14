@@ -16,15 +16,15 @@ public virtual with sharing class ForgeTriggerHandler {
     public virtual Integer getMaxReEntries() { return 1; }
 
     /** Switches off the handler with this class name for the rest of the transaction, until its bypass is cleared. */
-    public static void bypass(String handlerName)
+    public static void bypass(String handlerClassName)
     {
-        bypassedHandlers.add(handlerName);
+        bypassedHandlers.add(handlerClassName);
     }
 
     /** Switches the handler with this class name back on after a bypass. */
-    public static void clearBypass(String handlerName)
+    public static void clearBypass(String handlerClassName)
     {
-        bypassedHandlers.remove(handlerName);
+        bypassedHandlers.remove(handlerClassName);
     }
 
     /** Switches every bypassed handler back on. */
@@ -34,15 +34,15 @@ public virtual with sharing class ForgeTriggerHandler {
     }
 
     /** Tells whether the handler with this class name is switched off. */
-    public static Boolean isBypassed(String handlerName)
+    public static Boolean isBypassed(String handlerClassName)
     {
-        return bypassedHandlers.contains(handlerName);
+        return bypassedHandlers.contains(handlerClassName);
     }
 
     /** Tells how many times the handler with this class name has run in this transaction. */
-    public static Integer getRunCount(String handlerName)
+    public static Integer getRunCount(String handlerClassName)
     {
-        return runCounts.get(handlerName) == null ? 0 : runCounts.get(handlerName);
+        return runCounts.get(handlerClassName) == null ? 0 : runCounts.get(handlerClassName);
     }
 
     /** Forgets every handler's run count, for example between steps of a test. */
@@ -54,14 +54,14 @@ public virtual with sharing class ForgeTriggerHandler {
     /** Runs this handler for the current trigger event, unless it is switched off or is already running inside itself as deeply as its limit allows. */
     public void handle()
     {
-        String handlerName = String.valueOf(this).split(':')[0];
-        Integer depth = getActiveDepth(handlerName);
+        String handlerClassName = String.valueOf(this).split(':')[0];
+        Integer depth = getActiveDepth(handlerClassName);
 
-        if (isBypassed(handlerName)) { return; }
+        if (isBypassed(handlerClassName)) { return; }
         if (depth >= getMaxReEntries()) { return; }
 
-        runCounts.put(handlerName, getRunCount(handlerName) + 1);
-        activeDepths.put(handlerName, depth + 1);
+        runCounts.put(handlerClassName, getRunCount(handlerClassName) + 1);
+        activeDepths.put(handlerClassName, depth + 1);
 
         ForgeTriggerContext ctx = new ForgeTriggerContext(
             Trigger.operationType, Trigger.new, Trigger.newMap, Trigger.old, Trigger.oldMap
@@ -73,13 +73,13 @@ public virtual with sharing class ForgeTriggerHandler {
         }
         finally
         {
-            activeDepths.put(handlerName, depth);
+            activeDepths.put(handlerClassName, depth);
         }
     }
 
-    private static Integer getActiveDepth(String handlerName)
+    private static Integer getActiveDepth(String handlerClassName)
     {
-        return activeDepths.get(handlerName) == null ? 0 : activeDepths.get(handlerName);
+        return activeDepths.get(handlerClassName) == null ? 0 : activeDepths.get(handlerClassName);
     }
 
     /** Holds this handler's business logic for the trigger event; override it in each handler. */

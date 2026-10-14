@@ -26,14 +26,16 @@ private class ForgeTriggerHandlerTest {
     @IsTest
     static void bypassPreventsExecution()
     {
+        Test.startTest();
         ForgeTriggerHandler.bypass('TestHandler');
-
-        Assert.isTrue(ForgeTriggerHandler.isBypassed('TestHandler'),
-            'Handler should be bypassed');
-
+        Boolean bypassedAfterBypass = ForgeTriggerHandler.isBypassed('TestHandler');
         ForgeTriggerHandler.clearBypass('TestHandler');
+        Boolean bypassedAfterClear = ForgeTriggerHandler.isBypassed('TestHandler');
+        Test.stopTest();
 
-        Assert.isFalse(ForgeTriggerHandler.isBypassed('TestHandler'),
+        Assert.isTrue(bypassedAfterBypass,
+            'Handler should be bypassed');
+        Assert.isFalse(bypassedAfterClear,
             'Bypass should be cleared');
     }
 
@@ -43,7 +45,9 @@ private class ForgeTriggerHandlerTest {
         ForgeTriggerHandler.bypass('HandlerA');
         ForgeTriggerHandler.bypass('HandlerB');
 
+        Test.startTest();
         ForgeTriggerHandler.clearAllBypasses();
+        Test.stopTest();
 
         Assert.isFalse(ForgeTriggerHandler.isBypassed('HandlerA'));
         Assert.isFalse(ForgeTriggerHandler.isBypassed('HandlerB'));
@@ -75,8 +79,14 @@ private class ForgeTriggerHandlerTest {
     @IsTest
     static void resetRunCountsClearsState()
     {
+        new RunCountingHandler().handle();
+
+        Test.startTest();
         ForgeTriggerHandler.resetRunCounts();
+        Test.stopTest();
+
         Assert.areEqual(0, ForgeTriggerHandler.getRunCount('TestHandler'));
+        Assert.areEqual(0, ForgeTriggerHandler.getRunCount('RunCountingHandler'));
     }
 
     @IsTest
@@ -87,7 +97,9 @@ private class ForgeTriggerHandlerTest {
             new List<Account>{ new Account(Name = 'Test') }
         );
 
+        Test.startTest();
         handler.onTrigger(ctx);
+        Test.stopTest();
 
         Assert.areEqual(1, handler.triggerCount);
         Assert.areEqual(System.TriggerOperation.BEFORE_INSERT, handler.lastOperation);
@@ -96,9 +108,11 @@ private class ForgeTriggerHandlerTest {
     @IsTest
     static void contextOperationTypeIsSet()
     {
+        Test.startTest();
         ForgeTriggerContext ctx = ForgeTriggerContext.forInsert(
             new List<Account>{ new Account(Name = 'Test') }
         );
+        Test.stopTest();
 
         Assert.areEqual(System.TriggerOperation.BEFORE_INSERT, ctx.operationType);
     }
@@ -110,7 +124,11 @@ private class ForgeTriggerHandlerTest {
             new List<Account>{ new Account(Name = 'Test') }
         );
 
-        Assert.isTrue(ctx.hasChanged(ctx.newRecords[0], Account.Name),
+        Test.startTest();
+        Boolean changed = ctx.hasChanged(ctx.newRecords[0], Account.Name);
+        Test.stopTest();
+
+        Assert.isTrue(changed,
             'hasChanged should return true when oldMap is null (insert)');
     }
 
@@ -125,7 +143,11 @@ private class ForgeTriggerHandlerTest {
             new List<Account>{ oldAcc }
         );
 
-        Assert.isTrue(ctx.hasChanged(newAcc, Account.Name),
+        Test.startTest();
+        Boolean changed = ctx.hasChanged(newAcc, Account.Name);
+        Test.stopTest();
+
+        Assert.isTrue(changed,
             'hasChanged should return true when field value differs');
     }
 
@@ -140,7 +162,11 @@ private class ForgeTriggerHandlerTest {
             new List<Account>{ oldAcc }
         );
 
-        Assert.isFalse(ctx.hasChanged(newAcc, Account.Name),
+        Test.startTest();
+        Boolean changed = ctx.hasChanged(newAcc, Account.Name);
+        Test.stopTest();
+
+        Assert.isFalse(changed,
             'hasChanged should return false when field value is the same');
     }
 
@@ -151,7 +177,11 @@ private class ForgeTriggerHandlerTest {
         TestHandler h2 = new TestHandler();
 
         ForgeTriggerHandler.bypass('TestHandler');
+
+        Test.startTest();
         ForgeTriggerDispatcher.run(new List<ForgeTriggerHandler>{ h1, h2 });
+        Test.stopTest();
+
         ForgeTriggerHandler.clearAllBypasses();
     }
 

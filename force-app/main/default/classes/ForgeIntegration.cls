@@ -13,6 +13,8 @@ public abstract with sharing class ForgeIntegration {
     private static final Integer CALLOUT_SECONDS_PER_TRANSACTION = 120;
     private static final Integer CHAINED_JOBS_IN_TRIAL_AND_DEVELOPER_ORGS = 5;
     private static final Integer NO_CHAIN_LIMIT = 2147483647;
+    private static final Integer LONG_TEXT_LIMIT = 131072;
+    private static final Integer REASON_LIMIT = 32768;
     private static final List<Integer> RETRY_DELAY_MINUTES = new List<Integer>{ 1, 5 };
     private static final Integer MOST_ATTEMPTS = RETRY_DELAY_MINUTES.size() + 1;
     private static final Set<String> REPEATABLE_METHODS = new Set<String>{ 'GET', 'PUT', 'DELETE' };
@@ -394,7 +396,7 @@ public abstract with sharing class ForgeIntegration {
         private final Long started = System.currentTimeMillis();
         private Boolean ranOut = false;
 
-        private void makeRoomFor(Integer timeoutSeconds)
+        private void stopUnlessRoomFor(Integer timeoutSeconds)
         {
             Integer calloutsMade = Limits.getCallouts() + calloutsMadeBeforeJobForTest;
             Long secondsWaited = secondsWaitedBeforeJobForTest + (System.currentTimeMillis() - started) / 1000;
@@ -431,7 +433,7 @@ public abstract with sharing class ForgeIntegration {
 
         public void beforeSending(String method, Integer timeoutSeconds)
         {
-            room.makeRoomFor(timeoutSeconds);
+            room.stopUnlessRoomFor(timeoutSeconds);
             requestsSent.add(method);
         }
 
@@ -508,10 +510,10 @@ public abstract with sharing class ForgeIntegration {
         {
             failures.add(new Integration_Failure__c(
                 Integration__c = integrationName,
-                Record_Ids__c = String.join(recordIds, ',').abbreviate(131072),
+                Record_Ids__c = String.join(recordIds, ',').abbreviate(LONG_TEXT_LIMIT),
                 Status__c = status,
-                Reply_Body__c = replyBody == null ? null : replyBody.abbreviate(131072),
-                Reason__c = reason.abbreviate(32768)
+                Reply_Body__c = replyBody == null ? null : replyBody.abbreviate(LONG_TEXT_LIMIT),
+                Reason__c = reason.abbreviate(REASON_LIMIT)
             ));
         }
 
