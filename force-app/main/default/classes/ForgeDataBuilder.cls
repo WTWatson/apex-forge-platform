@@ -39,6 +39,7 @@ public with sharing class ForgeDataBuilder {
         new Map<SObjectType, Map<String, SObjectField>>();
 
     // Keyed by object and running user, because System.runAs can change which fields are createable.
+    // A test that changes a user's permissions and builds as that user again gets the list from before the change.
     private static final Map<String, List<Schema.DescribeFieldResult>> REQUIRED_FIELDS_BY_OBJECT =
         new Map<String, List<Schema.DescribeFieldResult>>();
 
