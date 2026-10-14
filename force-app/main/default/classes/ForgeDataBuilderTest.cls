@@ -277,6 +277,12 @@ private class ForgeDataBuilderTest {
     }
 
     @IsTest
+    static void fieldBelongsToSaysNoForAMissingField()
+    {
+        Assert.isFalse(ForgeDataBuilder.fieldBelongsTo(Account.SObjectType, null));
+    }
+
+    @IsTest
     static void repeatedBuildsOfOneObjectEachFillWhatIsMissing()
     {
         Test.startTest();
