@@ -23,6 +23,8 @@ public with sharing class ForgeAccess {
     /** The kinds of access a user may be missing. */
     public enum Access { READ, CREATE, EDIT, REMOVE }
 
+    private enum UneditableFieldsAre { REFUSED, LEFT_OUT }
+
     /** Runs the query with these binds as the user, and raises AccessDeniedException when the user may not read an object or field in it. */
     public static List<SObject> query(String soql, Map<String, Object> binds)
     {
@@ -45,7 +47,7 @@ public with sharing class ForgeAccess {
     /** Inserts the records with no Id and updates the rest, all or nothing, refusing the save when the user may not write a field it holds. */
     public static void save(List<SObject> records)
     {
-        saveWritable(records, false);
+        saveWritable(records, UneditableFieldsAre.REFUSED);
     }
 
     /** A save that leaves out the fields the user may not edit, instead of refusing it. */
@@ -65,7 +67,10 @@ public with sharing class ForgeAccess {
     {
         for (SObjectType type : typesOf(records))
         {
-            if (!type.getDescribe().isDeletable()) { throw new AccessDeniedException(String.valueOf(type), null, Access.REMOVE, new List<String>()); }
+            if (!type.getDescribe().isDeletable())
+            {
+                throw new AccessDeniedException(String.valueOf(type), null, Access.REMOVE, new List<String>());
+            }
         }
         Database.delete(records, true, AccessLevel.USER_MODE);
         for (SObject record : records) { remembered.remove(record.Id); }
@@ -79,7 +84,7 @@ public with sharing class ForgeAccess {
         /** Inserts the records with no Id and updates the rest, all or nothing, without the fields the user may not edit. */
         public void save(List<SObject> records)
         {
-            saveWritable(records, true);
+            saveWritable(records, UneditableFieldsAre.LEFT_OUT);
         }
     }
 
@@ -105,7 +110,7 @@ public with sharing class ForgeAccess {
         return type != null && !type.getDescribe().isAccessible();
     }
 
-    private static void saveWritable(List<SObject> records, Boolean leavingOut)
+    private static void saveWritable(List<SObject> records, UneditableFieldsAre uneditable)
     {
         leftOut = new Set<String>();
         List<SObject> inserts = new List<SObject>();
@@ -114,11 +119,11 @@ public with sharing class ForgeAccess {
         Map<String, Set<String>> notEditable = new Map<String, Set<String>>();
         for (SObject record : records)
         {
-            if (record.Id == null) { inserts.add(fieldsToWrite(record, notCreatable)); }
-            else { updates.add(fieldsToWrite(record, notEditable)); }
+            if (record.Id == null) { inserts.add(recordToWrite(record, notCreatable)); }
+            else { updates.add(recordToWrite(record, notEditable)); }
         }
-        inserts = checkedForUser(inserts, AccessType.CREATABLE, leavingOut, notCreatable);
-        updates = checkedForUser(updates, AccessType.UPDATABLE, leavingOut, notEditable);
+        inserts = checkedForUser(inserts, AccessType.CREATABLE, uneditable, notCreatable);
+        updates = checkedForUser(updates, AccessType.UPDATABLE, uneditable, notEditable);
         writeAllOrNothing(inserts, updates);
         Integer next = 0;
         for (SObject record : records)
@@ -129,7 +134,7 @@ public with sharing class ForgeAccess {
         rememberWritten(updates);
     }
 
-    private static SObject fieldsToWrite(SObject record, Map<String, Set<String>> refused)
+    private static SObject recordToWrite(SObject record, Map<String, Set<String>> refused)
     {
         SObjectType type = record.getSObjectType();
         if (!fieldsByType.containsKey(type)) { fieldsByType.put(type, type.getDescribe().fields.getMap()); }
@@ -179,23 +184,21 @@ public with sharing class ForgeAccess {
         return value == knownValue;
     }
 
-    private static List<SObject> checkedForUser(List<SObject> records, AccessType writing, Boolean leavingOut, Map<String, Set<String>> refused)
+    private static List<SObject> checkedForUser(List<SObject> records, AccessType writing, UneditableFieldsAre uneditable, Map<String, Set<String>> refused)
     {
         if (records.isEmpty()) { return records; }
+        Access missing = writing == AccessType.CREATABLE ? Access.CREATE : Access.EDIT;
         for (SObjectType type : typesOf(records))
         {
             DescribeSObjectResult describe = type.getDescribe();
             Boolean allowed = writing == AccessType.CREATABLE ? describe.isCreateable() : describe.isUpdateable();
-            if (!allowed)
-            {
-                throw new AccessDeniedException(String.valueOf(type), null, writing == AccessType.CREATABLE ? Access.CREATE : Access.EDIT, new List<String>());
-            }
+            if (!allowed) { throw new AccessDeniedException(String.valueOf(type), null, missing, new List<String>()); }
         }
         SObjectAccessDecision decision = Security.stripInaccessible(writing, records);
         Map<String, Set<String>> removed = decision.getRemovedFields();
         for (String objectName : removed.keySet()) { addRefused(refused, objectName, removed.get(objectName)); }
         if (refused.isEmpty()) { return records; }
-        if (!leavingOut) { throw fieldsDenied(refused, Access.EDIT); }
+        if (uneditable == UneditableFieldsAre.REFUSED) { throw fieldsDenied(refused, missing); }
         leftOut.addAll(qualifiedNames(refused));
         return decision.getRecords();
     }
@@ -218,6 +221,10 @@ public with sharing class ForgeAccess {
         {
             if (beforeSave != null) { Database.rollback(beforeSave); }
             throw failure;
+        }
+        finally
+        {
+            if (beforeSave != null) { Database.releaseSavepoint(beforeSave); }
         }
     }
 

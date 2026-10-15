@@ -39,6 +39,13 @@ private class ForgeAccessTest
         return new Map<String, Object>{ name => value };
     }
 
+    private static Set<String> namesOfAccountsAdded()
+    {
+        Set<String> names = new Set<String>();
+        for (Account account : [SELECT Name FROM Account WHERE Name LIKE 'Added%']) { names.add(account.Name); }
+        return names;
+    }
+
     @IsTest
     static void queryReturnsAListOfTheQueriedObjectSoTheCastHolds()
     {
@@ -210,6 +217,52 @@ private class ForgeAccessTest
         }
         Test.stopTest();
         Assert.isNotNull(added.Id);
+        Assert.areEqual('Renamed', [SELECT Name FROM Account WHERE Id = :existing.Id].Name);
+    }
+
+    @IsTest
+    static void manySavesThatInsertAndUpdateRunInOneTransaction()
+    {
+        User rep = aStandardUser();
+        Account existing = accountsOwnedBy(rep, 1)[0];
+        Test.startTest();
+        System.runAs(rep)
+        {
+            for (Integer save = 1; save <= 8; save++)
+            {
+                ForgeAccess.save(new List<Account>{ new Account(Name = 'Added ' + save), new Account(Id = existing.Id, Name = 'Renamed ' + save) });
+            }
+        }
+        Test.stopTest();
+        Assert.areEqual(8, [SELECT COUNT() FROM Account WHERE Name LIKE 'Added %']);
+        Assert.areEqual('Renamed 8', [SELECT Name FROM Account WHERE Id = :existing.Id].Name);
+    }
+
+    @IsTest
+    static void failedSavesThatInsertAndUpdateLeaveTheTransactionFreeToSaveAgain()
+    {
+        User rep = aStandardUser();
+        Account existing = accountsOwnedBy(rep, 1)[0];
+        Integer failures = 0;
+        Test.startTest();
+        System.runAs(rep)
+        {
+            for (Integer save = 1; save <= 6; save++)
+            {
+                try
+                {
+                    ForgeAccess.save(new List<Account>{ new Account(Name = 'Added ' + save), new Account(Id = existing.Id, Name = null) });
+                }
+                catch (DmlException failure)
+                {
+                    failures++;
+                }
+            }
+            ForgeAccess.save(new List<Account>{ new Account(Name = 'Added after'), new Account(Id = existing.Id, Name = 'Renamed') });
+        }
+        Test.stopTest();
+        Assert.areEqual(6, failures);
+        Assert.areEqual(new Set<String>{ 'Added after' }, namesOfAccountsAdded());
         Assert.areEqual('Renamed', [SELECT Name FROM Account WHERE Id = :existing.Id].Name);
     }
 

@@ -221,6 +221,32 @@ private class ForgeAccessOnOpportunityTest
     }
 
     @IsTest
+    static void aFieldTheRepMayNotSetOnANewRecordRefusesTheInsertAndAddsNothing()
+    {
+        User rep = aSalesRep();
+        Opportunity added = new Opportunity(Name = 'Added', StageName = 'Prospecting', CloseDate = Date.today(), Forge_Test_Margin__c = 9);
+        ForgeAccess.AccessDeniedException denied;
+        Test.startTest();
+        System.runAs(rep)
+        {
+            try
+            {
+                ForgeAccess.save(new List<Opportunity>{ added });
+            }
+            catch (ForgeAccess.AccessDeniedException failure)
+            {
+                denied = failure;
+            }
+        }
+        Test.stopTest();
+        Assert.areEqual('You cannot create Opportunity.Forge_Test_Margin__c.', denied.getMessage());
+        Assert.areEqual(ForgeAccess.Access.CREATE, denied.access);
+        Assert.areEqual('Forge_Test_Margin__c', denied.fieldName);
+        Assert.isNull(added.Id);
+        Assert.areEqual(0, [SELECT COUNT() FROM Opportunity WHERE Name = 'Added']);
+    }
+
+    @IsTest
     static void severalFieldsTheUserMayNotEditAreNamedFirstAndCounted()
     {
         User outsider = anOutsider();
