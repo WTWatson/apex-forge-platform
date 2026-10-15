@@ -35,8 +35,9 @@ would, at 1, 200 and 2,000 records. The published numbers are in
   front, such as `table_save_cpu_time_ms`, and the runner prints a table for each.
   The table save runs platform code, so it is checked against the thresholds like
   the main scenario; the plain-Apex scenarios are published to compare with and
-  are not checked. A size is published only if every scenario handled all its
-  records.
+  are not checked. The scenarios a module must report are declared in the runner
+  (`SCENARIOS`), and a size is published only if every run reported each of them
+  and each handled all its records.
 - A scenario where any run handled fewer records than it was given is not
   published or compared. Its runs stay in the results file, marked
   `"complete": false`.

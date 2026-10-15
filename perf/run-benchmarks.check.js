@@ -295,18 +295,25 @@ function accessReport(scenarioName, cpuTimeMs, handled = 200) {
   };
 }
 
-/** A user-access scenario from five identical test runs, each joining the main line with the lines beside it. */
-function accessScenario({
+/** One user-access test run at 200 records, joining the main line with the lines beside it; tableSave null leaves the table-save line out. */
+function accessRun({
   forge = 300,
   plain = 200,
   tableSave = 100,
   tableSaveHandled = 200,
 } = {}) {
-  const runs = Array.from({ length: 5 }, () => ({
+  return {
     ...publishedRun(accessReport(undefined, forge)),
     ...publishedRun(accessReport("plain", plain)),
-    ...publishedRun(accessReport("table-save", tableSave, tableSaveHandled)),
-  }));
+    ...(tableSave !== null &&
+      publishedRun(accessReport("table-save", tableSave, tableSaveHandled))),
+    ...publishedRun(accessReport("plain-table-save", 90)),
+  };
+}
+
+/** A user-access scenario from five identical test runs. */
+function accessScenario(options) {
+  const runs = Array.from({ length: 5 }, () => accessRun(options));
   return summarize("user-access", 200, runs);
 }
 
@@ -324,6 +331,18 @@ test("a scenario beside the main one is published with its name in front", () =>
 
 test("a size is not published when a scenario beside the main one did not handle every record", () => {
   assert.equal(accessScenario({ tableSaveHandled: 199 }).complete, false);
+});
+
+test("a size is not published when a declared scenario is missing from every run", () => {
+  assert.equal(accessScenario({ tableSave: null }).complete, false);
+});
+
+test("a size is not published when one run is missing a declared scenario", () => {
+  const runs = [
+    ...Array.from({ length: 4 }, () => accessRun()),
+    accessRun({ tableSave: null }),
+  ];
+  assert.equal(summarize("user-access", 200, runs).complete, false);
 });
 
 test("the table save's CPU time over its threshold is a regression", () => {

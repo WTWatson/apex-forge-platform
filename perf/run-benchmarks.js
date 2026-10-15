@@ -56,6 +56,12 @@ const TEST_CLASS_MODULES = {
   "forge-http": "ForgeHttpBenchmark",
   "user-access": "ForgeAccessBenchmark",
 };
+// The scenarios each module must report at every size, in every run; null is its main
+// one. A size where any of them is missing is not published or compared.
+const SCENARIOS = {
+  "user-access": [null, "plain", "table-save", "plain-table-save"],
+};
+const scenariosOf = (module) => SCENARIOS[module] ?? [null];
 const DEBUG_LEVEL = "ForgeBenchmark";
 
 // Apex field name -> published measure name.
@@ -158,12 +164,16 @@ function reportIn(line) {
   );
 }
 
+/** The published name of a scenario's measure: the scenario's name in front, except for the main one. */
+function scenarioMeasure(scenario, measure) {
+  return scenario ? `${scenario.replaceAll("-", "_")}_${measure}` : measure;
+}
+
 /** Renames a benchmark's report to the published measures, with the scenario's name in front for a scenario beside the main one, adding the queued jobs' where there are any. */
 function publishedRun(raw) {
   const run = {};
-  const prefix = raw.scenario ? `${raw.scenario.replaceAll("-", "_")}_` : "";
   for (const [apexName, publishedName] of Object.entries(MEASURES)) {
-    run[prefix + publishedName] = raw[apexName];
+    run[scenarioMeasure(raw.scenario, publishedName)] = raw[apexName];
   }
   return raw.jobs ? { ...run, ...jobMeasures(raw) } : run;
 }
@@ -278,7 +288,8 @@ function logIds(org) {
 }
 
 /** Runs a module's benchmark test class once and returns one run per size, read from the logs that run left. */
-function measureTestRunOnce(org, testClass) {
+function measureTestRunOnce(org, module) {
+  const testClass = TEST_CLASS_MODULES[module];
   const before = new Set(logIds(org));
   const outcome = sfJson([
     "apex",
@@ -310,9 +321,12 @@ function measureTestRunOnce(org, testClass) {
       }
     }
   }
-  // Every size needs its main scenario's line and a line for each scenario beside it.
+  // Every size needs a line for each scenario the module declares, and every measure
+  // any line of this run gave.
   const measures = new Set([...runsBySize.values()].flatMap(Object.keys));
-  measures.add("records_handled");
+  for (const scenario of scenariosOf(module)) {
+    measures.add(scenarioMeasure(scenario, "records_handled"));
+  }
   const missing = RECORD_COUNTS.filter((size) =>
     [...measures].some((measure) => !(measure in (runsBySize.get(size) ?? {}))),
   );
@@ -324,18 +338,24 @@ function measureTestRunOnce(org, testClass) {
   return runsBySize;
 }
 
-/** Whether every run of a scenario, and of each scenario measured beside it, handled all its records; only then is it published or compared. */
+/** Whether every run reported each scenario its module declares, and each handled all its records; only then is it published or compared. */
 function isComplete(entry) {
-  return entry.runs.every((run) =>
-    Object.keys(run)
-      .filter((measure) => measure.endsWith("records_handled"))
-      .every((measure) => run[measure] === entry.records),
+  return (
+    entry.runs.length > 0 &&
+    entry.runs.every(
+      (run) =>
+        run !== undefined &&
+        scenariosOf(entry.module).every(
+          (scenario) =>
+            run[scenarioMeasure(scenario, "records_handled")] === entry.records,
+        ),
+    )
   );
 }
 
 /** Works out a scenario's kept values from its runs, or marks it incomplete and keeps only the runs. */
 function summarize(module, records, runs) {
-  if (!isComplete({ records, runs })) {
+  if (!isComplete({ module, records, runs })) {
     return { module, records, complete: false, runs };
   }
   const medianRun = {};
@@ -543,7 +563,7 @@ function measureInOrg(org, id, runs, commit, modules = MODULES) {
       const measured = [];
       for (let run = 1; run <= runs; run++) {
         process.stderr.write(`${module} (${testClass}) run ${run}/${runs}\n`);
-        measured.push(measureTestRunOnce(org, testClass));
+        measured.push(measureTestRunOnce(org, module));
       }
       for (const records of RECORD_COUNTS) {
         const bySize = measured.map((runsBySize) => runsBySize.get(records));
