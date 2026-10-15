@@ -77,48 +77,54 @@ are reported too.
 
 ## Trigger handler framework
 
-_Run: 2026-10-14, f44dffa, API 66.0_
+_Run: 2026-10-15, 36791f7, API 66.0_
 
 | Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
 | ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ----------------- |
-| 1       | 20     | 487   | 0    | 0          | 1   | 1        | 91      | within thresholds |
-| 200     | 376    | 5263  | 0    | 0          | 1   | 200      | 574     | within thresholds |
-| 2000    | 3550   | 48463 | 0    | 0          | 1   | 2000     | 5003    | within thresholds |
+| 1       | 26     | 513   | 0    | 0          | 1   | 1        | 108     | within thresholds |
+| 200     | 463    | 5263  | 0    | 0          | 1   | 200      | 627     | within thresholds |
+| 2000    | 4469   | 48463 | 0    | 0          | 1   | 2000     | 5768    | within thresholds |
 
 Consumer lines: 15 (with the platform) / 21 (plain Apex)
 
 ## Data builder and seeder
 
-_Run: 2026-10-14, f44dffa, API 66.0_
+_Run: 2026-10-15, 36791f7, API 66.0_
 
-| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
-| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ----------------- |
-| 1       | 64     | 3926   | 0    | 0          | 2   | 2        | 183     | within thresholds |
-| 200     | 505    | 28297  | 0    | 0          | 2   | 201      | 848     | within thresholds |
-| 2000    | 4738   | 250646 | 0    | 0          | 2   | 2001     | 8492    | within thresholds |
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change                     |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | -------------------------- |
+| 1       | 58     | 6419   | 0    | 0          | 2   | 2        | 192     | heap +66%, explained below |
+| 200     | 469    | 30790  | 0    | 0          | 2   | 201      | 859     | within thresholds          |
+| 2000    | 4276   | 253191 | 0    | 0          | 2   | 2001     | 8081    | within thresholds          |
 
-Consumer lines: 13 (with the platform) / 31 (plain Apex)
+Consumer lines: 11 (with the platform) / 31 (plain Apex)
+
+The data builder now keeps each object's field describes for the rest of the
+transaction instead of describing them again on every build. Against the previous
+version in the same org, CPU time fell by 24% at 1 record (76 to 58 ms) and 15% at
+2,000 (5,055 to 4,276 ms). The cost is about 2.5 KB of heap that stays alive: the
+field maps and required-field lists of the two objects the scenario builds. It is
+the same 2.5 KB at every size, because it grows with the number of object types a
+transaction builds, about 1.1 KB each, and not with the number of records. At 1
+record that is 66% more than before (3,874 to 6,419 bytes), and 0.04% of the 6 MB
+heap limit.
 
 ## ForgeHttp
 
-_Run: 2026-10-14, f44dffa, API 66.0_
+_Run: 2026-10-15, 36791f7, API 66.0_
 
 The scenario: a sales user inserts Accounts, the Account trigger's handler sends
 them to an ERP through ForgeHttp, and a mock answers for the ERP. The save queues
 the sending as background jobs (queueables), which make the callouts, so the cost
 is in two places: the save itself, and the jobs it queues.
 
-This is the first published run of ForgeHttp, so every row reads "First published
-run": there is no earlier version to compare it with. The next change to ForgeHttp
-is compared with these numbers.
-
 The save, measured like the other modules:
 
-| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
-| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ------------------- |
-| 1       | 24     | 1059  | 0    | 0          | 1   | 1        | 160     | First published run |
-| 200     | 317    | 5835  | 0    | 0          | 1   | 200      | 578     | First published run |
-| 2000    | 3158   | 49035 | 0    | 0          | 1   | 2000     | 5070    | First published run |
+| Records | CPU ms | Heap  | SOQL | Query rows | DML | DML rows | Wall ms | Change            |
+| ------- | ------ | ----- | ---- | ---------- | --- | -------- | ------- | ----------------- |
+| 1       | 24     | 1075  | 0    | 0          | 1   | 1        | 149     | within thresholds |
+| 200     | 295    | 5851  | 0    | 0          | 1   | 200      | 483     | within thresholds |
+| 2000    | 3378   | 49051 | 0    | 0          | 1   | 2000     | 5204    | within thresholds |
 
 The jobs the save queues. Each job runs in its own transaction, with its own
 limits. The job columns are read when the job saves the Accounts it sent, in the
@@ -131,9 +137,9 @@ check below covers each job only up to its save.
 
 | Records | Callouts in save | Jobs queued | Jobs run | Callouts per job | Job CPU ms | Job SOQL | Job query rows | Job DML | Job DML rows | Failures |
 | ------- | ---------------- | ----------- | -------- | ---------------- | ---------- | -------- | -------------- | ------- | ------------ | -------- |
-| 1       | 0                | 1           | 1        | 1                | 34         | 1        | 1              | 1       | 1            | 0        |
-| 200     | 0                | 1           | 1        | 4                | 478        | 1        | 200            | 1       | 200          | 0        |
-| 2000    | 0                | 10          | 10       | 4                | 546        | 1        | 200            | 1       | 200          | 0        |
+| 1       | 0                | 1           | 1        | 1                | 37         | 1        | 1              | 1       | 1            | 0        |
+| 200     | 0                | 1           | 1        | 4                | 517        | 1        | 200            | 1       | 200          | 0        |
+| 2000    | 0                | 10          | 10       | 4                | 669        | 1        | 200            | 1       | 200          | 0        |
 
 | Column                   | What it means                                                                              |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
@@ -167,8 +173,77 @@ still reads 200, and that row is a second sample at 200 records read.
 
 | Records saved | Records read by one job | Readable fields | Every-field query CPU ms | Every-field query heap | Only-used-fields query CPU ms | Only-used-fields query heap |
 | ------------- | ----------------------- | --------------- | ------------------------ | ---------------------- | ----------------------------- | --------------------------- |
-| 1             | 1                       | 58              | 11                       | 400                    | 4                             | 91                          |
-| 200           | 200                     | 58              | 23                       | 76474                  | 6                             | 16266                       |
-| 2000          | 200                     | 58              | 23                       | 66874                  | 7                             | 16266                       |
+| 1             | 1                       | 58              | 11                       | 400                    | 5                             | 91                          |
+| 200           | 200                     | 58              | 22                       | 76474                  | 6                             | 16266                       |
+| 2000          | 200                     | 58              | 22                       | 66874                  | 7                             | 16266                       |
 
 Consumer lines: 89 (with the platform) / 210 (plain Apex)
+
+## ForgeAccess
+
+_Run: 2026-10-15, 36791f7, API 66.0_
+
+The scenario: a sales rep, a Standard User with a permission set, opens a table of
+an account's open opportunities. The table's controller reads them with
+`ForgeAccess.query`, and the rep changes their stage and saves with
+`ForgeAccess.save`, both with the rep's own permissions. ForgeAccess refuses an
+object or field the rep may not read or edit, and names it in the error.
+
+This is the first published run of ForgeAccess, so every row reads "First published
+run": there is no earlier version to compare it with. The next change to ForgeAccess
+is compared with these numbers.
+
+Reading the opportunities, changing only their stage and saving them, in one
+transaction:
+
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms | Change              |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- | ------------------- |
+| 1       | 21     | 1847   | 1    | 1          | 1   | 1        | 116     | First published run |
+| 200     | 411    | 52575  | 1    | 200        | 1   | 200      | 2590    | First published run |
+| 2000    | 3779   | 515375 | 1    | 2000       | 1   | 2000     | 25215   | First published run |
+
+The same work in plain Apex, with the same checks and the same error messages
+written by hand (`perf/scenarios/user-access/plain.cls`): a query `WITH USER_MODE`,
+then `Security.stripInaccessible` and `update as user` on the save.
+
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- |
+| 1       | 19     | 428    | 1    | 1          | 1   | 1        | 132     |
+| 200     | 346    | 24996  | 1    | 200        | 1   | 200      | 2548    |
+| 2000    | 3198   | 249196 | 1    | 2000       | 1   | 2000     | 24470   |
+
+ForgeAccess spends 10% to 19% more CPU than the plain controller, and about twice
+its heap at 200 and 2,000 records. The extra heap is what ForgeAccess keeps of each record it read, so that
+the save writes only the fields that changed: here the stage, where the plain
+controller writes all four fields it read. Both use one query and one DML
+statement at every size.
+
+The table itself sends only each record's Id and its new stage, in a call of its
+own, so ForgeAccess has nothing it read earlier to compare with. Saving those
+records with ForgeAccess:
+
+| Records | CPU ms | Heap   | SOQL | Query rows | DML | DML rows | Wall ms |
+| ------- | ------ | ------ | ---- | ---------- | --- | -------- | ------- |
+| 1       | 11     | 1546   | 0    | 0          | 1   | 1        | 78      |
+| 200     | 370    | 12093  | 0    | 0          | 1   | 200      | 2519    |
+| 2000    | 3158   | 107493 | 0    | 0          | 1   | 2000     | 26336   |
+
+And with the plain controller:
+
+| Records | CPU ms | Heap | SOQL | Query rows | DML | DML rows | Wall ms |
+| ------- | ------ | ---- | ---- | ---------- | --- | -------- | ------- |
+| 1       | 11     | 298  | 0    | 0          | 1   | 1        | 82      |
+| 200     | 316    | 298  | 0    | 0          | 1   | 200      | 2470    |
+| 2000    | 2881   | 298  | 0    | 0          | 1   | 2000     | 25588   |
+
+Here the two spend the same CPU at 1 record, and ForgeAccess 10% to 17% more at
+200 and 2,000. ForgeAccess still holds about 54 bytes a record after the save
+returns. The plain save holds 298 bytes at every size: heap counts only what the
+call still holds when it returns, and the plain save keeps almost nothing.
+
+The ForgeAccess save is checked against the thresholds like the main table. The two
+plain-Apex tables are published to compare with and are not checked. Most of the
+wall time at every size is Salesforce saving the opportunities, which both
+controllers do the same way.
+
+Consumer lines: 17 (with the platform) / 53 (plain Apex)
