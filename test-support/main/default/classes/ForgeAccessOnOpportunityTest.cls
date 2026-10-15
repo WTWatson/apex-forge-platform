@@ -4,7 +4,8 @@
  * Test support only: ForgeAccess as a sales rep meets it, a Standard User with the
  * Forge_Test_Access permission set, on Opportunity fields of every kind the save
  * decides about: a formula, a roll-up, an auto-number, a field the rep may only
- * read, one the rep may not read, and a field writable on create but not on update.
+ * read, one the rep may not read, a field writable on create but not on update, and
+ * fields nobody may write.
  *
  * Copyright (C) 2026 William Watson <will@cli.run>
  * https://github.com/WTWatson/apex-forge-platform
@@ -72,6 +73,15 @@ private class ForgeAccessOnOpportunityTest
     private static Map<String, Object> ownedBy(User owner)
     {
         return new Map<String, Object>{ 'ownerId' => owner.Id };
+    }
+
+    private static Opportunity sentBackWhole(Opportunity opportunity)
+    {
+        Opportunity stored = [SELECT Id, StageName, IsClosed, ExpectedRevenue FROM Opportunity WHERE Id = :opportunity.Id];
+        Map<String, Object> sent = (Map<String, Object>) JSON.deserializeUntyped(JSON.serialize(stored));
+        sent.put('StageName', 'Qualification');
+        sent.put('ExpectedRevenue', 100);
+        return (Opportunity) JSON.deserialize(JSON.serialize(sent), Opportunity.class);
     }
 
     @IsTest
@@ -342,5 +352,48 @@ private class ForgeAccessOnOpportunityTest
         Assert.isNotNull(line.Id);
         Assert.areEqual('You cannot edit Forge_Test_Line__c.Opportunity__c.', message);
         Assert.areEqual(opportunities[0].Id, [SELECT Opportunity__c FROM Forge_Test_Line__c WHERE Id = :line.Id].Opportunity__c);
+    }
+
+    @IsTest
+    static void fieldsNobodyMayWriteSentBackFromAComponentRefuseTheSave()
+    {
+        User rep = aSalesRep();
+        Opportunity opportunity = opportunitiesOwnedBy(rep, 1)[0];
+        Opportunity fromComponent = sentBackWhole(opportunity);
+        ForgeAccess.AccessDeniedException denied;
+        Test.startTest();
+        System.runAs(rep)
+        {
+            try
+            {
+                ForgeAccess.save(new List<Opportunity>{ fromComponent });
+            }
+            catch (ForgeAccess.AccessDeniedException refused)
+            {
+                denied = refused;
+            }
+        }
+        Test.stopTest();
+        Assert.areEqual('You cannot edit Opportunity.ExpectedRevenue and 1 more field.', denied.getMessage());
+        Assert.areEqual(new List<String>{ 'Opportunity.ExpectedRevenue', 'Opportunity.IsClosed' }, denied.deniedFields);
+        Assert.areEqual('Prospecting', [SELECT StageName FROM Opportunity WHERE Id = :opportunity.Id].StageName);
+    }
+
+    @IsTest
+    static void fieldsNobodyMayWriteAreLeftOutWhenAsked()
+    {
+        User rep = aSalesRep();
+        Opportunity opportunity = opportunitiesOwnedBy(rep, 1)[0];
+        Opportunity fromComponent = sentBackWhole(opportunity);
+        Set<String> leftOut;
+        Test.startTest();
+        System.runAs(rep)
+        {
+            ForgeAccess.leavingOutUneditable().save(new List<Opportunity>{ fromComponent });
+            leftOut = ForgeAccess.lastLeftOut();
+        }
+        Test.stopTest();
+        Assert.areEqual(new Set<String>{ 'Opportunity.ExpectedRevenue', 'Opportunity.IsClosed' }, leftOut);
+        Assert.areEqual('Qualification', [SELECT StageName FROM Opportunity WHERE Id = :opportunity.Id].StageName);
     }
 }

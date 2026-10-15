@@ -110,13 +110,15 @@ public with sharing class ForgeAccess {
         leftOut = new Set<String>();
         List<SObject> inserts = new List<SObject>();
         List<SObject> updates = new List<SObject>();
+        Map<String, Set<String>> notCreatable = new Map<String, Set<String>>();
+        Map<String, Set<String>> notEditable = new Map<String, Set<String>>();
         for (SObject record : records)
         {
-            if (record.Id == null) { inserts.add(fieldsToWrite(record)); }
-            else { updates.add(fieldsToWrite(record)); }
+            if (record.Id == null) { inserts.add(fieldsToWrite(record, notCreatable)); }
+            else { updates.add(fieldsToWrite(record, notEditable)); }
         }
-        inserts = checkedForUser(inserts, AccessType.CREATABLE, leavingOut);
-        updates = checkedForUser(updates, AccessType.UPDATABLE, leavingOut);
+        inserts = checkedForUser(inserts, AccessType.CREATABLE, leavingOut, notCreatable);
+        updates = checkedForUser(updates, AccessType.UPDATABLE, leavingOut, notEditable);
         writeAllOrNothing(inserts, updates);
         Integer next = 0;
         for (SObject record : records)
@@ -127,7 +129,7 @@ public with sharing class ForgeAccess {
         rememberWritten(updates);
     }
 
-    private static SObject fieldsToWrite(SObject record)
+    private static SObject fieldsToWrite(SObject record, Map<String, Set<String>> refused)
     {
         SObjectType type = record.getSObjectType();
         if (!fieldsByType.containsKey(type)) { fieldsByType.put(type, type.getDescribe().fields.getMap()); }
@@ -142,7 +144,16 @@ public with sharing class ForgeAccess {
             SObjectField field = fields.get(fieldName);
             if (field == null || isMaintainedBySalesforce(type, field)) { continue; }
             Object value = values.get(fieldName);
-            if (knownValues == null || !isUnchanged(knownValues, fieldName, value)) { written.put(field, value); }
+            if (knownValues != null && isUnchanged(knownValues, fieldName, value)) { continue; }
+            try
+            {
+                written.put(field, value);
+            }
+            catch (SObjectException notWritable)
+            {
+                // A field nobody may write, such as Opportunity.ExpectedRevenue, is refused like a missing permission.
+                addRefused(refused, String.valueOf(type), new Set<String>{ String.valueOf(field) });
+            }
         }
         written.Id = record.Id;
         return written;
@@ -168,7 +179,7 @@ public with sharing class ForgeAccess {
         return value == knownValue;
     }
 
-    private static List<SObject> checkedForUser(List<SObject> records, AccessType writing, Boolean leavingOut)
+    private static List<SObject> checkedForUser(List<SObject> records, AccessType writing, Boolean leavingOut, Map<String, Set<String>> refused)
     {
         if (records.isEmpty()) { return records; }
         for (SObjectType type : typesOf(records))
@@ -182,10 +193,17 @@ public with sharing class ForgeAccess {
         }
         SObjectAccessDecision decision = Security.stripInaccessible(writing, records);
         Map<String, Set<String>> removed = decision.getRemovedFields();
-        if (removed.isEmpty()) { return records; }
-        if (!leavingOut) { throw fieldsDenied(removed, Access.EDIT); }
-        leftOut.addAll(qualifiedNames(removed));
+        for (String objectName : removed.keySet()) { addRefused(refused, objectName, removed.get(objectName)); }
+        if (refused.isEmpty()) { return records; }
+        if (!leavingOut) { throw fieldsDenied(refused, Access.EDIT); }
+        leftOut.addAll(qualifiedNames(refused));
         return decision.getRecords();
+    }
+
+    private static void addRefused(Map<String, Set<String>> refused, String objectName, Set<String> fieldNames)
+    {
+        if (!refused.containsKey(objectName)) { refused.put(objectName, new Set<String>()); }
+        refused.get(objectName).addAll(fieldNames);
     }
 
     private static void writeAllOrNothing(List<SObject> inserts, List<SObject> updates)
