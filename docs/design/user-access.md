@@ -153,10 +153,9 @@ sentence a user can read: "You cannot edit Opportunity.Amount.", or "You cannot
 read Opportunity." when the whole object is closed to the user. It names the
 object and field by their API names, which do not change with the user's language
 and are what an admin looks for in a permission set. When several fields fail, the
-message names the first one and says how many more there are. The build confirms
-in an org that a Lightning component receives this message as it is when the
-controller does not catch it; if the message does not arrive, that becomes a
-question for Will before the sample is final.
+message names the first one and says how many more there are. Will confirms
+by hand in an org that a Lightning component receives this message as it is; if it
+does not, the sample changes before merge.
 
 A validation rule, a locked record or any other DML error is raised as the
 `DmlException` Salesforce gives, after the rollback.
