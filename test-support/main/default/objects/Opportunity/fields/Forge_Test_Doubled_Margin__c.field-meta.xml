@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Forge_Test_Doubled_Margin__c</fullName>
+    <label>Forge Test Doubled Margin</label>
+    <description>Test support only: a formula field.</description>
+    <type>Number</type>
+    <precision>10</precision>
+    <scale>2</scale>
+    <formula>Forge_Test_Margin__c * 2</formula>
+    <formulaTreatBlanksAs>BlankAsZero</formulaTreatBlanksAs>
+</CustomField>

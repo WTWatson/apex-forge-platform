@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Opportunity__c</fullName>
+    <label>Opportunity</label>
+    <description>Test support only: the line's Opportunity, set when the line is created and never moved, so it can be written on create but not on update.</description>
+    <type>MasterDetail</type>
+    <referenceTo>Opportunity</referenceTo>
+    <relationshipName>Forge_Test_Lines</relationshipName>
+    <relationshipLabel>Forge Test Lines</relationshipLabel>
+    <relationshipOrder>0</relationshipOrder>
+    <reparentableMasterDetail>false</reparentableMasterDetail>
+    <writeRequiresMasterRead>false</writeRequiresMasterRead>
+</CustomField>

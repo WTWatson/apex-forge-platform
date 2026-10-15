@@ -6,8 +6,6 @@ permissions. The platform checks them before it reads or writes. It runs every
 query and every save in user mode, and when a check fails it raises one error
 naming the object and the field.
 
-The name `ForgeAccess` is a proposal; see "Questions for Will".
-
 ## The scenario
 
 A sales rep opens an account in Lightning and sees its open opportunities in a
@@ -92,7 +90,7 @@ any user-mode test does. The platform adds no test setup of its own.
   query in system mode and removing fields afterwards is weaker than user mode: a
   filter or order on a hidden field still shapes the result, and the user can learn
   its value by trying filters. A safe version needs the platform to build the
-  field list itself, which is the query builder in question 2.
+  field list itself, which is a query builder and its own module.
 
 ### Saving
 
@@ -136,8 +134,6 @@ any user-mode test does. The platform adds no test setup of its own.
   back would have every field checked, and a read-only amount would refuse the
   save.
 
-Question 4 asks Will to choose this.
-
 ### The error
 
 `ForgeAccess.AccessDeniedException` is raised only for a missing permission: the
@@ -172,26 +168,24 @@ controller in both versions. The describe and strip calls are where the cost wil
 be; heap grows with the remembered records, and a mixed save spends one more DML
 statement on the savepoint.
 
-## Questions for Will
+## Decisions
 
-1. **Name.** `ForgeAccess` (recommended), `ForgeSecurity` or `ForgeUserMode`.
-2. **How a query is written.** A SOQL string with a map of binds, as above
-   (recommended for now). The other choice is a small query builder, which is
-   larger and is its own module; it would also make a safe read that leaves out
-   unreadable fields possible.
-3. **What happens by default when a field fails on save.** Refuse with the error
-   (recommended), with leaving it out as the explicit choice. The opposite default
-   quietly drops a user's change.
-4. **Saving records read earlier in the same transaction.** Write only the fields
-   that changed since `query` read them (recommended), or write every field set on
-   the record.
-5. **One `save` or separate verbs.** One `save` that inserts or updates by Id, plus
-   `remove` (recommended), or `insert`, `update` and `remove` as in plain Apex,
-   which would also need no savepoint.
-6. **Partial success.** All or nothing, as plain DML (recommended), or save what
-   passes and report the rest, as `Database.update(records, false)` does.
+Will decided these on 2026-10-15.
 
-## Decisions already taken
+1. **Name.** `ForgeAccess`.
+2. **How a query is written.** A SOQL string with a map of binds. A query builder,
+   and a read that leaves out unreadable fields, are not in this version.
+3. **What happens by default when a field fails on save.** The save is refused
+   with the error; leaving the field out is the explicit choice,
+   `leavingOutUneditable()`.
+4. **Saving records read earlier in the same transaction.** A record read through
+   `query` in the same transaction writes only the fields that changed since.
+5. **One `save` or separate verbs.** One `save` that inserts or updates by Id,
+   plus `remove`.
+6. **Partial success.** All or nothing: a save that both inserts and updates sets
+   a savepoint and rolls back both when either fails.
+
+## Decisions taken with the design
 
 - **User mode always.** Every query and DML statement runs in user mode. No
   system-mode switch and no system-mode read in this module; code that needs

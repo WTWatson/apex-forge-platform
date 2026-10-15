@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Forge Test Line</label>
+    <pluralLabel>Forge Test Lines</pluralLabel>
+    <description>Test support only: a line under an Opportunity, so the ForgeAccess tests have a roll-up summary and a field that can be set on create but not on update.</description>
+    <nameField>
+        <label>Line Name</label>
+        <type>Text</type>
+    </nameField>
+    <deploymentStatus>Deployed</deploymentStatus>
+    <sharingModel>ControlledByParent</sharingModel>
+    <externalSharingModel>ControlledByParent</externalSharingModel>
+    <enableReports>false</enableReports>
+    <enableSearch>false</enableSearch>
+    <enableActivities>false</enableActivities>
+    <enableHistory>false</enableHistory>
+    <enableFeeds>false</enableFeeds>
+    <enableBulkApi>true</enableBulkApi>
+    <enableSharing>true</enableSharing>
+    <enableStreamingApi>true</enableStreamingApi>
+</CustomObject>
