@@ -97,16 +97,22 @@ any user-mode test does. The platform adds no test setup of its own.
 - `save(records)` inserts the records that have no Id and updates the ones that
   have one. `remove(records)` deletes.
 - Before any DML it checks the object: may the user create, edit or delete it.
+  `remove` checks the object only, since a delete writes no fields.
 - It then decides which fields each record writes (see the next section) and
   checks them with `Security.stripInaccessible` and the matching access type. A
   field the user may not edit is refused, unless the developer asked to leave it
   out with `leavingOutUneditable()`, and the fields it left out are then on
-  `ForgeAccess.lastLeftOut()`.
+  `ForgeAccess.lastLeftOut()`: a set of `Object.Field` names for the whole save,
+  not one per record.
 - A short, fixed list of fields that Salesforce itself maintains is never written
   and never refused: the Id, the audit fields (`CreatedDate`, `CreatedById`,
   `LastModifiedDate`, `LastModifiedById`, `SystemModstamp`), formula and roll-up
   fields, and auto-numbers. A record read from the database carries them, and the
-  user did not set them. The build proves each kind in an org. Every other field
+  user did not set them. The platform finds them by describe: the audit names,
+  `isCalculated()` (formulas and roll-ups) and `isAutoNumber()`. Other fields
+  Salesforce maintains, such as `Opportunity.IsClosed` and `ExpectedRevenue`, are
+  not on the list, so a component that sends a whole Opportunity back is refused
+  for them. The build proves each kind in an org. Every other field
   goes through the check above and is written in user mode: a field whose access
   cannot be set in a permission set but that the user may still write, such as a
   required field, is not dropped. A field that can be set on create but not on
@@ -123,7 +129,8 @@ any user-mode test does. The platform adds no test setup of its own.
 ### Which fields a save writes
 
 - **A record this transaction read through `query`:** only the fields that differ
-  from what `query` returned. The platform remembers each record it returned, by
+  from what `query` returned. Text that changes in case only, "Acme" to "ACME",
+  is a change. The platform remembers each record it returned, by
   Id, for the rest of the transaction; a later `query` or `save` of the same
   record replaces what it remembers. This is for Apex that reads, changes and
   saves records in one transaction, such as a batch job or a trigger's follow-up
@@ -137,8 +144,10 @@ any user-mode test does. The platform adds no test setup of its own.
 ### The error
 
 `ForgeAccess.AccessDeniedException` is raised only for a missing permission: the
-object and field checks before the DML, or a user-mode query or DML that
-Salesforce refuses for access. It holds the object, the field and the kind of
+object and field checks before the DML, or a user-mode query that Salesforce
+refuses for an object or field permission. A record the user may see but not
+edit because of sharing is not a permission: that save raises the `DmlException`
+Salesforce gives (`INSUFFICIENT_ACCESS_OR_READONLY`), unchanged. `AccessDeniedException` holds the object, the field and the kind of
 access (read, create, edit or delete) that was missing. Its message is one
 sentence a user can read: "You cannot edit Opportunity.Amount.", or "You cannot
 read Opportunity." when the whole object is closed to the user. It names the
