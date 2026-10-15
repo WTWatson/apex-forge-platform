@@ -12,6 +12,8 @@ would, at 1, 200 and 2,000 records. The published numbers are in
   `<Module>Benchmark` class per module sets up and performs the scenario, and the
   consumer classes they call (`LeadRatingHandler` with `LeadTrigger`,
   `CustomerSeed`) are the same code as the module's `forge` sample.
+  `ForgeAccessBenchmark` holds both of its module's controllers, the `forge` and the
+  `plain` sample, as inner classes.
 - `scenarios/<module>/` holds the paired consumer samples: `forge.*` is the code a
   developer writes with the platform, `plain.*` the plain-Apex equivalent. Consumer
   lines are the non-blank, non-comment lines of each side.
@@ -25,6 +27,16 @@ would, at 1, 200 and 2,000 records. The published numbers are in
   measures every size, and the runner reads each size's numbers from the debug
   log the run leaves. Before the first test run it traces the org's user at the
   `ForgeBenchmark` debug level, which it creates if the org has none.
+- A test class can measure other scenarios beside the module's main one, each
+  test method writing one line that names its scenario. `ForgeAccessBenchmark`
+  measures the plain-Apex controller beside ForgeAccess's (`plain`), and the save
+  of records that hold only an Id and the changed field with each (`table-save`,
+  `plain-table-save`). Their measures are published with the scenario's name in
+  front, such as `table_save_cpu_time_ms`, and the runner prints a table for each.
+  The table save runs platform code, so it is checked against the thresholds like
+  the main scenario; the plain-Apex scenarios are published to compare with and
+  are not checked. A size is published only if every scenario handled all its
+  records.
 - A scenario where any run handled fewer records than it was given is not
   published or compared. Its runs stay in the results file, marked
   `"complete": false`.

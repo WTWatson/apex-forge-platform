@@ -43,11 +43,19 @@ const DEFAULT_THRESHOLDS = {
   heap_min_bytes: 512,
 };
 
-const MODULES = ["trigger-handler", "data-builder", "forge-http"];
+const MODULES = [
+  "trigger-handler",
+  "data-builder",
+  "forge-http",
+  "user-access",
+];
 const RECORD_COUNTS = [1, 200, 2000];
 // Modules whose scenario runs only in a test (it needs a mock or a test-only trigger):
 // one test run measures every size, and the numbers come back through the debug log.
-const TEST_CLASS_MODULES = { "forge-http": "ForgeHttpBenchmark" };
+const TEST_CLASS_MODULES = {
+  "forge-http": "ForgeHttpBenchmark",
+  "user-access": "ForgeAccessBenchmark",
+};
 const DEBUG_LEVEL = "ForgeBenchmark";
 
 // Apex field name -> published measure name.
@@ -70,7 +78,16 @@ const MEASURES = {
 const isLargestRunMeasure = (measure) => measure.endsWith("heap_bytes");
 // The job_ measures, and callouts and jobs_queued, exist only for modules that queue
 // jobs; a measure missing on either side of a comparison is skipped.
-const CPU_MEASURES = ["cpu_time_ms", "job_cpu_time_ms"];
+// A test class can measure other scenarios beside a module's main one: a report line
+// naming a scenario has its measures published with the scenario's name in front, such
+// as table_save_cpu_time_ms. ForgeAccess's table save runs platform code, so it is
+// checked like the main scenario; its plain-Apex scenarios are published unchecked, to
+// compare with.
+const CPU_MEASURES = [
+  "cpu_time_ms",
+  "job_cpu_time_ms",
+  "table_save_cpu_time_ms",
+];
 const COUNT_MEASURES = [
   "soql_queries",
   "query_rows",
@@ -83,10 +100,14 @@ const COUNT_MEASURES = [
   "job_query_rows",
   "job_dml_statements",
   "job_dml_rows",
+  "table_save_soql_queries",
+  "table_save_query_rows",
+  "table_save_dml_statements",
+  "table_save_dml_rows",
 ];
 // A job's heap is not gated: the only reading is taken in a trigger the job's save
 // fires, and a trigger's heap leaves out what the job holds around the save.
-const HEAP_MEASURES = ["heap_bytes"];
+const HEAP_MEASURES = ["heap_bytes", "table_save_heap_bytes"];
 const NOT_PUBLISHED = "Not published yet";
 const EXIT_REGRESSION = 2;
 const EXIT_UNCOMPARED = 3;
@@ -137,11 +158,12 @@ function reportIn(line) {
   );
 }
 
-/** Renames a benchmark's report to the published measures, adding the queued jobs' where there are any. */
+/** Renames a benchmark's report to the published measures, with the scenario's name in front for a scenario beside the main one, adding the queued jobs' where there are any. */
 function publishedRun(raw) {
   const run = {};
+  const prefix = raw.scenario ? `${raw.scenario.replaceAll("-", "_")}_` : "";
   for (const [apexName, publishedName] of Object.entries(MEASURES)) {
-    run[publishedName] = raw[apexName];
+    run[prefix + publishedName] = raw[apexName];
   }
   return raw.jobs ? { ...run, ...jobMeasures(raw) } : run;
 }
@@ -281,22 +303,34 @@ function measureTestRunOnce(org, testClass) {
     for (const line of (log.log ?? log).split("\n")) {
       if (line.includes(REPORT_PREFIX)) {
         const raw = reportIn(line);
-        runsBySize.set(raw.records, publishedRun(raw));
+        runsBySize.set(raw.records, {
+          ...runsBySize.get(raw.records),
+          ...publishedRun(raw),
+        });
       }
     }
   }
-  const missing = RECORD_COUNTS.filter((size) => !runsBySize.has(size));
+  // Every size needs its main scenario's line and a line for each scenario beside it.
+  const measures = new Set([...runsBySize.values()].flatMap(Object.keys));
+  measures.add("records_handled");
+  const missing = RECORD_COUNTS.filter((size) =>
+    [...measures].some((measure) => !(measure in (runsBySize.get(size) ?? {}))),
+  );
   if (missing.length) {
     throw new Error(
-      `${testClass} passed but left no benchmark line for ${missing.join(", ")} records; is the org's user traced?`,
+      `${testClass} passed but left a benchmark line out for ${missing.join(", ")} records; is the org's user traced?`,
     );
   }
   return runsBySize;
 }
 
-/** Whether every run of a scenario handled all its records; only then is it published or compared. */
+/** Whether every run of a scenario, and of each scenario measured beside it, handled all its records; only then is it published or compared. */
 function isComplete(entry) {
-  return entry.runs.every((run) => run.records_handled === entry.records);
+  return entry.runs.every((run) =>
+    Object.keys(run)
+      .filter((measure) => measure.endsWith("records_handled"))
+      .every((measure) => run[measure] === entry.records),
+  );
 }
 
 /** Works out a scenario's kept values from its runs, or marks it incomplete and keeps only the runs. */
@@ -662,6 +696,9 @@ function printTables(run, changeFor) {
         (each) => each.module === module && kept(each).jobs_run !== undefined,
       ),
     );
+    printScenarioTables(
+      run.results.filter((each) => each.module === module && each.complete),
+    );
     console.log(
       `\nConsumer lines: ${run.consumer_lines[module].forge} (forge) / ${run.consumer_lines[module].plain} (plain)`,
     );
@@ -694,6 +731,37 @@ function printJobTables(entries) {
     console.log(
       `| ${entry.records} | ${Math.min(entry.records, 200)} | ${m.readable_fields} | ${m.field_query_cpu_time_ms} | ${m.field_query_heap_bytes} | ${m.used_fields_query_cpu_time_ms} | ${m.used_fields_query_heap_bytes} |`,
     );
+  }
+}
+
+/** Prints one table for each scenario measured beside a module's main one, such as its plain-Apex version. */
+function printScenarioTables(entries) {
+  const prefixes = [
+    ...new Set(
+      entries.flatMap((entry) =>
+        Object.keys(kept(entry))
+          .filter(
+            (measure) =>
+              measure.endsWith("_records_handled") &&
+              measure !== "records_handled",
+          )
+          .map((measure) => measure.slice(0, -"records_handled".length)),
+      ),
+    ),
+  ];
+  for (const prefix of prefixes) {
+    console.log(`\n${prefix.slice(0, -1)}:\n`);
+    console.log(
+      "| Records | CPU ms | Heap | SOQL | Query rows | DML | DML rows | Wall ms |",
+    );
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (const entry of entries) {
+      const m = kept(entry);
+      const at = (measure) => m[prefix + measure];
+      console.log(
+        `| ${entry.records} | ${at("cpu_time_ms")} | ${at("heap_bytes")} | ${at("soql_queries")} | ${at("query_rows")} | ${at("dml_statements")} | ${at("dml_rows")} | ${at("wall_time_ms")} |`,
+      );
+    }
   }
 }
 

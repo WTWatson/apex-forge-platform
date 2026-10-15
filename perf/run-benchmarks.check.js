@@ -277,3 +277,79 @@ test("each job's reading is kept in the runs but not summarized", () => {
   assert.equal(entry.median.job_readings, undefined);
   assert.equal(entry.median.job_dml_rows, 100);
 });
+
+/** A ForgeAccess report line for one scenario at 200 records, at the given CPU time; the main scenario names none. */
+function accessReport(scenarioName, cpuTimeMs, handled = 200) {
+  return {
+    module: "user-access",
+    records: 200,
+    ...(scenarioName && { scenario: scenarioName }),
+    recordsHandled: handled,
+    cpuTimeMs,
+    heapBytes: 1000,
+    soqlQueries: 1,
+    queryRows: 200,
+    dmlStatements: 1,
+    dmlRows: 200,
+    wallTimeMs: cpuTimeMs,
+  };
+}
+
+/** A user-access scenario from five identical test runs, each joining the main line with the lines beside it. */
+function accessScenario({
+  forge = 300,
+  plain = 200,
+  tableSave = 100,
+  tableSaveHandled = 200,
+} = {}) {
+  const runs = Array.from({ length: 5 }, () => ({
+    ...publishedRun(accessReport(undefined, forge)),
+    ...publishedRun(accessReport("plain", plain)),
+    ...publishedRun(accessReport("table-save", tableSave, tableSaveHandled)),
+  }));
+  return summarize("user-access", 200, runs);
+}
+
+const PUBLISHED_ACCESS = results("aaaaaaa", "2026-10-01T10:00:00Z", [
+  accessScenario(),
+]);
+
+test("a scenario beside the main one is published with its name in front", () => {
+  const entry = accessScenario();
+  assert.equal(entry.median.cpu_time_ms, 300);
+  assert.equal(entry.median.plain_cpu_time_ms, 200);
+  assert.equal(entry.median.table_save_dml_rows, 200);
+  assert.equal(entry.largest.table_save_heap_bytes, 1000);
+});
+
+test("a size is not published when a scenario beside the main one did not handle every record", () => {
+  assert.equal(accessScenario({ tableSaveHandled: 199 }).complete, false);
+});
+
+test("the table save's CPU time over its threshold is a regression", () => {
+  const candidate = jobCandidate(
+    accessScenario(),
+    accessScenario({ tableSave: 200 }),
+  );
+  const comparison = compareWithBaseline(
+    candidate,
+    [PUBLISHED_ACCESS],
+    THRESHOLDS,
+  );
+  assert.deepEqual(comparison.regressions, [
+    "user-access 200: table_save_cpu_time_ms +100%",
+  ]);
+});
+
+test("the plain-Apex scenario is published but not checked", () => {
+  const candidate = jobCandidate(
+    accessScenario(),
+    accessScenario({ plain: 400 }),
+  );
+  const comparison = compareWithBaseline(
+    candidate,
+    [PUBLISHED_ACCESS],
+    THRESHOLDS,
+  );
+  assert.deepEqual(comparison.regressions, []);
+});
